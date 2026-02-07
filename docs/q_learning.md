@@ -2,6 +2,9 @@
 
 ### State Vector (6 values)
 
+
+See [this doc](https://docs.google.com/document/d/1oITOzKycnmKilUiKKwH4EgwXyeOtTVNaefD7BhEul1U/edit?tab=t.6lak97m9056e) for more context and results.
+
 The Q-learning state is a 6-element tuple derived from the RAM extractor:
 
 1. Left distance to nearest wall (non-negative)
