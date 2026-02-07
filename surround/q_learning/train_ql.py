@@ -7,7 +7,7 @@ import gymnasium as gym
 import numpy as np
 from tqdm import trange
 
-from surround.q_learning.ram_probe import create_extractor
+from surround.utils.ram_probe import create_extractor
 
 DIFFICULTY = 0
 MODE = 0
