@@ -1,13 +1,12 @@
 import json
 from pathlib import Path
-from typing import Callable, cast
 
 import ale_py
 import gymnasium as gym
 import numpy as np
 from tqdm import trange
 
-from surround.utils.ram_probe import create_extractor
+from surround.utils.video_extract_locations import get_location
 
 DIFFICULTY = 0
 MODE = 0
@@ -56,8 +55,6 @@ class QLearning:
         self.epsilon = epsilon_start
         self.episodes = episodes
         self.n_actions = self.env.action_space.n
-        print("creating extractor...")
-        self.extractor = create_extractor(use_multi_agent=USE_MULTI_AGENT_EXTRACTOR)
 
         print("creating q-table...")
         self.q_table: dict[tuple[int, ...], np.ndarray] = {}
@@ -70,8 +67,8 @@ class QLearning:
         self.episode_returns: list[float] = []
 
     def _get_state(self, observation: np.ndarray) -> tuple[int, ...]:
-        features = self.extractor(observation)
-        return _clip_state(tuple(int(value) for value in features))
+        locations = get_location(observation)
+        return _clip_state(tuple(int(value) for value in locations))
 
     def _get_q(self, state: tuple[int, ...]) -> np.ndarray:
         if state not in self.q_table:
@@ -174,7 +171,6 @@ class QLearning:
 
 
 _Q_TABLE_CACHE: dict[tuple[int, ...], np.ndarray] | None = None
-_EXTRACTOR_CACHE: Callable[[np.ndarray], tuple[int, ...]] | None = None
 
 
 def load_q_table(path: Path) -> dict[tuple[int, ...], np.ndarray]:
@@ -197,16 +193,14 @@ def _clip_state(features: tuple[int, ...]) -> tuple[int, ...]:
 
 
 def greedy_q_policy(action_space, observation, info, last_action):
-    global _Q_TABLE_CACHE, _EXTRACTOR_CACHE
+    global _Q_TABLE_CACHE
 
     if _Q_TABLE_CACHE is None:
         _Q_TABLE_CACHE = load_q_table(Q_TABLE_PATH)
-    if _EXTRACTOR_CACHE is None:
-        _EXTRACTOR_CACHE = create_extractor(use_multi_agent=USE_MULTI_AGENT_EXTRACTOR)
 
-    extractor = cast(Callable[[np.ndarray], tuple[int, ...]], _EXTRACTOR_CACHE)
-    features = extractor(observation)
-    state = _clip_state(tuple(int(value) for value in features))
+    # frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
+    # locations = get_location(frame)
+    state = None
     q_values = _Q_TABLE_CACHE.get(state)
     if q_values is None:
         return int(action_space.sample())
