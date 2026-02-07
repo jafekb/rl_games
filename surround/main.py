@@ -4,6 +4,9 @@ import imageio.v2 as imageio
 from pettingzoo.atari import surround_v2
 from tqdm import trange
 
+from surround.ai import get_ai_action
+from surround.human import get_human_action
+
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 10000
 VIDEO_DIR = Path("video")
@@ -12,8 +15,6 @@ VIDEO_FPS = 120
 FRAME_STRIDE = 4
 HUMAN_AGENT = "second_0"
 AI_AGENT = "first_0"
-ACTION_WORDS_5 = ("NOOP", "UP", "RIGHT", "LEFT", "DOWN")
-ACTION_WORD_TO_ID = {word: action_id for action_id, word in enumerate(ACTION_WORDS_5)}
 
 env = surround_v2.env(
     obs_type="ram",
@@ -26,15 +27,6 @@ env = surround_v2.env(
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 print(f"Human agent: {HUMAN_AGENT} | AI agent: {AI_AGENT}")
-
-
-def get_human_action(action_space, action_names):
-    return ACTION_WORD_TO_ID["RIGHT"]
-
-
-def get_ai_action(action_space, action_names):
-    directional = [ACTION_WORD_TO_ID[name] for name in ("UP", "RIGHT", "LEFT", "DOWN")]
-    return directional[action_space.sample() % len(directional)]
 
 
 env.reset()
