@@ -23,6 +23,23 @@ Total possible states with this clipping:
 
 - `8^4 * 15^2 = 921,600`
 
+### Surround-Aware State (Opponent Window)
+
+To support surround behavior, we also use an opponent-centric local grid plus
+small global scalars:
+
+- 7x7 window centered on the opponent (row-major), where each cell is:
+  - `0` empty
+  - `1` wall/trail or out-of-bounds
+  - `2` ego head
+- `dx`, `dy` from ego to opponent (clipped to `[-7, 7]`)
+- `ego_exits`: number of free neighbor cells (0-4)
+- `opp_exits`: number of free neighbor cells (0-4)
+
+Approximate state space size:
+
+- `3^(7*7) * 15^2 * 5 * 5`
+
 ### Action Choices (5 values)
 
 The action space uses the minimal ALE action set for `ALE/Surround-v5` with
