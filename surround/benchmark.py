@@ -18,7 +18,7 @@ from surround.q_learning.train_ql import greedy_q_policy
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 10000
-EPISODES = 10
+EPISODES = 20
 SEED = 0
 DIFFICULTY = 0
 MODE = 0
