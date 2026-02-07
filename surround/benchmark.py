@@ -17,7 +17,7 @@ from surround.policies.random import random_policy
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 10000
-EPISODES = 20
+EPISODES = 10
 SEED = 0
 DIFFICULTY = 0
 MODE = 0
@@ -76,35 +76,37 @@ def summarize(returns):
 
 def main() -> None:
     env = make_env(DIFFICULTY, MODE)
-    policy = POLICIES[POLICY]
-    video_writer = None
-
-    returns = []
     try:
-        if RECORD_VIDEO:
-            VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-            video_writer = imageio.get_writer(
-                str(VIDEO_PATH),
-                fps=VIDEO_FPS,
-                macro_block_size=1,
-            )
-        for episode in trange(EPISODES, desc="Episodes"):
-            total = run_episode(
-                env,
-                policy,
-                seed=SEED + episode,
-                video_writer=video_writer,
-                episode_index=episode,
-            )
-            returns.append(total)
+        results = {}
+        for policy_name, policy in POLICIES.items():
+            video_writer = None
+            if RECORD_VIDEO:
+                VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+                video_path = VIDEO_DIR / f"{policy_name}.mp4"
+                video_writer = imageio.get_writer(
+                    str(video_path),
+                    fps=VIDEO_FPS,
+                    macro_block_size=1,
+                )
+            returns = []
+            for episode in trange(EPISODES, desc=f"Episodes ({policy_name})"):
+                total = run_episode(
+                    env,
+                    policy,
+                    seed=SEED + episode,
+                    video_writer=video_writer,
+                    episode_index=episode,
+                )
+                returns.append(total)
+            results[policy_name] = summarize(returns)
+            if video_writer is not None:
+                video_writer.close()
     finally:
-        if video_writer is not None:
-            video_writer.close()
         env.close()
 
-    summary = summarize(returns)
     print(f"Episodes: {EPISODES}")
-    print(f"mean_return={summary['mean']:.2f} std={summary['std']:.2f}")
+    for policy_name, stats in results.items():
+        print(f"{policy_name}: mean_return={stats['mean']:.2f} std={stats['std']:.2f}")
 
 
 if __name__ == "__main__":
