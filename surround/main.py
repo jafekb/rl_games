@@ -9,6 +9,8 @@ VIDEO_DIR = Path("video")
 VIDEO_PATH = VIDEO_DIR / "surround.mp4"
 VIDEO_FPS = 120
 FRAME_STRIDE = 4
+HUMAN_AGENT = "agent_0"
+AI_AGENT = "agent_1"
 
 env = surround_v2.env(
     obs_type="ram",
@@ -20,8 +22,39 @@ env = surround_v2.env(
 
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
+if hasattr(env, "possible_agents") and env.possible_agents:
+    if len(env.possible_agents) >= 2:
+        HUMAN_AGENT, AI_AGENT = env.possible_agents[:2]
+        HUMAN_AGENT, AI_AGENT = AI_AGENT, HUMAN_AGENT
+    print(f"Human agent: {HUMAN_AGENT} | AI agent: {AI_AGENT}")
+
+action_meanings = None
+if hasattr(env.unwrapped, "get_action_meanings"):
+    action_meanings = env.unwrapped.get_action_meanings()
+
+
+def get_human_action(action_space, action_names):
+    if action_names and "RIGHT" in action_names:
+        return action_names.index("RIGHT")
+    return 0
+
+
+def get_ai_action(action_space, action_names):
+    if action_names:
+        directional = [
+            action_names.index(name)
+            for name in ("UP", "RIGHT", "LEFT", "DOWN")
+            if name in action_names
+        ]
+        if directional:
+            return directional[action_space.sample() % len(directional)]
+    return action_space.sample()
+
+
 env.reset()
 video_writer = imageio.get_writer(str(VIDEO_PATH), fps=VIDEO_FPS)
+if action_meanings:
+    print("Action meanings:", action_meanings)
 try:
     for cycle_step in range(MAX_CYCLES):
         agents_this_cycle = list(env.agents)
@@ -31,7 +64,14 @@ try:
             agent = env.agent_selection
             observation, reward, termination, truncation, info = env.last()
             # this is where you would insert your policy
-            action = None if termination or truncation else env.action_space(agent).sample()
+            if termination or truncation:
+                action = None
+            elif agent == HUMAN_AGENT:
+                action = get_human_action(env.action_space(agent), action_meanings)
+            elif agent == AI_AGENT:
+                action = get_ai_action(env.action_space(agent), action_meanings)
+            else:
+                action = env.action_space(agent).sample()
             env.step(action)
         print(f"{cycle_step=}")
         if cycle_step % FRAME_STRIDE == 0:

@@ -21,6 +21,9 @@ dev = [
     "ruff>=0.9.1",
 ]
 
+[tool.setuptools]
+packages = []
+
 # https://docs.astral.sh/ruff/configuration/
 # https://docs.astral.sh/ruff/rules/
 
