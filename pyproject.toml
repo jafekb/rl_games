@@ -14,12 +14,16 @@ dependencies = [
     "multi-agent-ale-py>=0.1.11",
     "pettingzoo",
     "pygame>=2.6.1",
+    "tqdm>=4.67.3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "ruff>=0.9.1",
 ]
+
+[tool.setuptools]
+packages = []
 
 # https://docs.astral.sh/ruff/configuration/
 # https://docs.astral.sh/ruff/rules/

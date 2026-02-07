@@ -2,17 +2,23 @@ from pathlib import Path
 
 import imageio.v2 as imageio
 from pettingzoo.atari import surround_v2
+from tqdm import trange
+
+from surround.ai import get_ai_action
+from surround.human import get_human_action
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
-MAX_CYCLES = 100000
+MAX_CYCLES = 10000
 VIDEO_DIR = Path("video")
 VIDEO_PATH = VIDEO_DIR / "surround.mp4"
 VIDEO_FPS = 120
 FRAME_STRIDE = 4
+HUMAN_AGENT = "second_0"
+AI_AGENT = "first_0"
 
 env = surround_v2.env(
     obs_type="ram",
-    full_action_space=True,
+    full_action_space=False,
     max_cycles=MAX_CYCLES,
     auto_rom_install_path=ROM_PATH,
     render_mode="rgb_array",
@@ -20,20 +26,28 @@ env = surround_v2.env(
 
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
+print(f"Human agent: {HUMAN_AGENT} | AI agent: {AI_AGENT}")
+
+
 env.reset()
-video_writer = imageio.get_writer(str(VIDEO_PATH), fps=VIDEO_FPS)
+video_writer = imageio.get_writer(str(VIDEO_PATH), fps=VIDEO_FPS, macro_block_size=1)
 try:
-    for cycle_step in range(MAX_CYCLES):
+    for cycle_step in trange(MAX_CYCLES):
         agents_this_cycle = list(env.agents)
         if not agents_this_cycle:
             break
         for _ in agents_this_cycle:
             agent = env.agent_selection
             observation, reward, termination, truncation, info = env.last()
-            # this is where you would insert your policy
-            action = None if termination or truncation else env.action_space(agent).sample()
+            if termination or truncation:
+                action = None
+            elif agent == HUMAN_AGENT:
+                action = get_human_action(env.action_space(agent), None)
+            elif agent == AI_AGENT:
+                action = get_ai_action(env.action_space(agent), None)
+            else:
+                action = env.action_space(agent).sample()
             env.step(action)
-        print(f"{cycle_step=}")
         if cycle_step % FRAME_STRIDE == 0:
             frame = env.render()
             if frame is not None:
