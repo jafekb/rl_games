@@ -7,7 +7,8 @@ ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 100000
 VIDEO_DIR = Path("video")
 VIDEO_PATH = VIDEO_DIR / "surround.mp4"
-VIDEO_FPS = 60
+VIDEO_FPS = 120
+FRAME_STRIDE = 4
 
 env = surround_v2.env(
     obs_type="ram",
@@ -33,9 +34,10 @@ try:
             action = None if termination or truncation else env.action_space(agent).sample()
             env.step(action)
         print(f"{cycle_step=}")
-        frame = env.render()
-        if frame is not None:
-            video_writer.append_data(frame)
+        if cycle_step % FRAME_STRIDE == 0:
+            frame = env.render()
+            if frame is not None:
+                video_writer.append_data(frame)
 finally:
     video_writer.close()
     env.close()
