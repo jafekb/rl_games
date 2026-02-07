@@ -34,3 +34,18 @@ The action space uses the minimal ALE action set for `ALE/Surround-v5` with
 3. LEFT
 4. DOWN
 
+### Training Improvements (Post-First Run)
+
+After the first benchmark run, we made targeted changes to improve learning
+stability and coverage:
+
+- Longer training: increased total episodes and cycles to capture more state
+  transitions.
+- Optimistic initialization: new states start with `np.ones` to encourage early
+  exploration and faster differentiation between actions.
+- Epsilon decay: exploration starts high and decays toward a minimum to shift
+  from exploration to exploitation as training progresses.
+- Reward shaping: a small per-step reward (+0.01) for non-terminal steps
+  encourages survival and longer rollouts.
+- Environment similarity: set the difficulty to 0 during training instead of 1 so that the opponent is the same during training and eval.
+
