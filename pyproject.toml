@@ -9,6 +9,8 @@ description = "Simple reinforcement learning for games, etc"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "imageio>=2.37.2",
+    "imageio-ffmpeg>=0.6.0",
     "multi-agent-ale-py>=0.1.11",
     "pettingzoo",
     "pygame>=2.6.1",
