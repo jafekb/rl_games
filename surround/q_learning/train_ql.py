@@ -12,14 +12,17 @@ from surround.q_learning.ram_probe import create_extractor
 DIFFICULTY = 0
 MODE = 0
 SEED = 0
-MAX_CYCLES = 1000000
+MAX_CYCLES = 10_000
 ALPHA = 0.1
 GAMMA = 0.99
 USE_MULTI_AGENT_EXTRACTOR = True
 CLIP_MAX = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
-EPSILON = 0.1
-EPISODES = 40000
+EPSILON_START = 1.0
+EPSILON_MIN = 0.05
+EPSILON_DECAY_STEPS = 1000
+EPISODES = 100_000
+STEP_REWARD = 0.01
 
 
 def total_possible_states() -> int:
@@ -38,10 +41,19 @@ def make_env(difficulty: int, mode: int):
 
 
 class QLearning:
-    def __init__(self, epsilon: float, episodes: int):
+    def __init__(
+        self,
+        epsilon_start: float,
+        epsilon_min: float,
+        epsilon_decay_steps: int,
+        episodes: int,
+    ):
         print("Initializing Q-Learning...")
         self.env = make_env(difficulty=0, mode=0)
-        self.epsilon = epsilon
+        self.epsilon_start = epsilon_start
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay_steps = epsilon_decay_steps
+        self.epsilon = epsilon_start
         self.episodes = episodes
         self.n_actions = self.env.action_space.n
         print("creating extractor...")
@@ -63,7 +75,7 @@ class QLearning:
 
     def _get_q(self, state: tuple[int, ...]) -> np.ndarray:
         if state not in self.q_table:
-            self.q_table[state] = np.zeros(self.n_actions, dtype=np.float32)
+            self.q_table[state] = np.ones(self.n_actions, dtype=np.float32)
         return self.q_table[state]
 
     def _get_action(self, state: tuple[int, ...]) -> tuple[int, bool]:
@@ -83,6 +95,8 @@ class QLearning:
         ):
             action, is_random = self._get_action(state)
             observation, reward, terminated, truncated, _info = self.env.step(action)
+            if not (terminated or truncated):
+                reward += STEP_REWARD
 
             next_state = self._get_state(observation)
             q_values = self._get_q(state)
@@ -107,7 +121,17 @@ class QLearning:
 
     def train(self):
         print("Training Q-Learning...")
+        if self.epsilon_start <= 0:
+            decay_rate = 0.0
+        else:
+            decay_rate = np.log(self.epsilon_start / self.epsilon_min) / max(
+                self.epsilon_decay_steps, 1
+            )
         for iternum in trange(self.episodes):
+            self.epsilon = max(
+                self.epsilon_min,
+                self.epsilon_start * np.exp(-decay_rate * iternum),
+            )
             self.run_episode(episode_index=iternum)
             print("q_table size:", len(self.q_table))
             if (iternum + 1) % 1000 == 0:
@@ -127,6 +151,10 @@ class QLearning:
                 "episodes": self.episodes,
                 "max_cycles": MAX_CYCLES,
                 "epsilon": self.epsilon,
+                "epsilon_start": self.epsilon_start,
+                "epsilon_min": self.epsilon_min,
+                "epsilon_decay_steps": self.epsilon_decay_steps,
+                "epsilon_decay_type": "exponential",
                 "q_table_size": q_table_size,
                 "unique_states": len(self.unique_states),
                 "total_states_possible": total_states,
@@ -187,7 +215,9 @@ def greedy_q_policy(action_space, observation, info):
 
 if __name__ == "__main__":
     q_learning = QLearning(
-        epsilon=EPSILON,
+        epsilon_start=EPSILON_START,
+        epsilon_min=EPSILON_MIN,
+        epsilon_decay_steps=EPSILON_DECAY_STEPS,
         episodes=EPISODES,
     )
     q_learning.train()
