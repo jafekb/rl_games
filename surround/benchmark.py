@@ -24,7 +24,6 @@ MODE = 0
 POLICY = "human"
 RECORD_VIDEO = True
 VIDEO_DIR = Path("video")
-VIDEO_PATH = VIDEO_DIR / "surround_benchmark.mp4"
 VIDEO_FPS = 120
 FRAME_STRIDE = 4
 
