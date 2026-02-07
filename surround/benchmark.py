@@ -12,7 +12,8 @@ from tqdm import trange
 if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from surround.human import get_human_action
+from surround.policies.human import get_human_action
+from surround.policies.random import random_policy
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 10000
@@ -26,10 +27,6 @@ VIDEO_DIR = Path("video")
 VIDEO_PATH = VIDEO_DIR / "surround_benchmark.mp4"
 VIDEO_FPS = 120
 FRAME_STRIDE = 4
-
-
-def random_policy(action_space, observation, info=None) -> int:
-    return action_space.sample()
 
 
 POLICIES = {
