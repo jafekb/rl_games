@@ -6,6 +6,8 @@ from tqdm import trange
 RECORD_VIDEO = True
 DIFFICULTY = 1
 MODE = 0
+SEED = 0
+MAX_CYCLES = 10000
 
 
 def make_env(difficulty: int, mode: int):
@@ -32,11 +34,37 @@ class QLearning:
         self.q_table = np.zeros((n_states, n_actions))
         print(f"Q-Table: {self.q_table.shape}")
 
+    def _get_action(self, observation):
+        import pdb
+
+        pdb.set_trace()
+
+    def run_episode(self, episode_index: int):
+        observation, info = self.env.reset(seed=SEED + episode_index)
+        total = 0.0
+        for cycle_step in trange(
+            MAX_CYCLES,
+            leave=False,
+        ):
+            action = self._get_action(observation)
+            observation, reward, terminated, truncated, info = env.step(action)
+            total += reward
+            if video_writer is not None and cycle_step % FRAME_STRIDE == 0:
+                frame = env.render()
+                if frame is not None:
+                    video_writer.append_data(frame)
+            if terminated or truncated:
+                break
+        return total
+
     def train(self):
         print("Training Q-Learning...")
+        returns = []
 
         for iternum in trange(self.episodes):
-            pass
+            total = self.run_episode(episode_index=iternum)
+            returns.append(total)
+        print(returns)
 
 
 if __name__ == "__main__":

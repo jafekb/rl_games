@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# NOTE: OCAtari does not support Surround, so this script probes RAM directly.
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
