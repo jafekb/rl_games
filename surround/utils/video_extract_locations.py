@@ -30,15 +30,21 @@ def mask_to_grid_locations(mask: np.ndarray) -> list[tuple[int, int]]:
 
 
 def get_location(image: np.ndarray) -> dict[str, tuple[int, int]]:
-    locations = {}
+    locations = {
+        "ego": None,
+        "opp": None,
+        "walls": None,
+    }
     game = image[35:197, 4:156, :]
     ego = cv2.inRange(game, (90, 192, 180), (100, 197, 185))
     opponent = cv2.inRange(game, (70, 70, 195), (75, 75, 205))
     walls = cv2.inRange(game, (190, 100, 210), (200, 110, 220))
     x, y = np.where(ego)
-    locations["ego"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
+    if x.size > 0 and y.size > 0:
+        locations["ego"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
     x, y = np.where(opponent)
-    locations["opp"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
+    if x.size > 0 and y.size > 0:
+        locations["opp"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
     locations["walls"] = mask_to_grid_locations(walls)
 
     if VISUALIZE:
