@@ -12,12 +12,11 @@ from tqdm import trange
 if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from surround.policies.human import get_human_action
 from surround.policies.random import random_policy
-from surround.q_learning.train_ql import greedy_q_policy
+from surround.policies.snake_baseline import snake_policy
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
-MAX_CYCLES = 10000
+MAX_CYCLES = 100_000
 EPISODES = 20
 SEED = 0
 DIFFICULTY = 0
@@ -31,8 +30,9 @@ FRAME_STRIDE = 4
 
 POLICIES = {
     "random": random_policy,
-    "human": get_human_action,
-    "q_learning": greedy_q_policy,
+    # "human": get_human_action,
+    # "q_learning": greedy_q_policy,
+    "snake": snake_policy,
 }
 
 
@@ -40,31 +40,36 @@ def make_env(difficulty: int, mode: int):
     gym.register_envs(ale_py)
     return gym.make(
         "ALE/Surround-v5",
-        obs_type="ram",
+        obs_type="rgb",
         full_action_space=False,
         difficulty=difficulty,
         mode=mode,
         render_mode="rgb_array" if RECORD_VIDEO else None,
+        frameskip=FRAME_STRIDE,
     )
 
 
 def run_episode(env, policy, seed, video_writer, episode_index: int):
     observation, info = env.reset(seed=seed)
     total = 0.0
+    last_action = 0
     for cycle_step in trange(
         MAX_CYCLES,
         desc=f"Episode {episode_index + 1}/{EPISODES}",
         leave=False,
     ):
-        action = policy(env.action_space, observation, info)
+        action = policy(env.action_space, observation, info, last_action)
         observation, reward, terminated, truncated, info = env.step(action)
         total += reward
         if video_writer is not None and cycle_step % FRAME_STRIDE == 0:
             frame = env.render()
             if frame is not None:
                 video_writer.append_data(frame)
+            # imageio.imwrite(f"video/frame_{cycle_step:04d}.png", frame)
+
         if terminated or truncated:
             break
+        last_action = action
     return total
 
 
