@@ -47,4 +47,5 @@ stability and coverage:
   from exploration to exploitation as training progresses.
 - Reward shaping: a small per-step reward (+0.01) for non-terminal steps
   encourages survival and longer rollouts.
+- Environment similarity: set the difficulty to 0 during training instead of 1 so that the opponent is the same during training and eval.
 
