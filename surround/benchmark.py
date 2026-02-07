@@ -14,6 +14,7 @@ if __package__ is None:
 
 from surround.policies.human import get_human_action
 from surround.policies.random import random_policy
+from surround.q_learning.train_ql import greedy_q_policy
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 10000
@@ -31,6 +32,7 @@ FRAME_STRIDE = 4
 POLICIES = {
     "random": random_policy,
     "human": get_human_action,
+    "q_learning": greedy_q_policy,
 }
 
 
