@@ -1,0 +1,9 @@
+---
+description: Use uv instead of pip
+alwaysApply: true
+---
+
+# Use uv, not pip
+
+- Use `uv` or `uvx` for installing, running, or tooling tasks instead of `pip`.
+- If a workflow or script needs to install tools, prefer `astral-sh/setup-uv` and `uvx`.
