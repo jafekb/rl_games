@@ -12,10 +12,12 @@ VIDEO_FPS = 120
 FRAME_STRIDE = 4
 HUMAN_AGENT = "second_0"
 AI_AGENT = "first_0"
+ACTION_WORDS_5 = ("NOOP", "UP", "RIGHT", "LEFT", "DOWN")
+ACTION_WORD_TO_ID = {word: action_id for action_id, word in enumerate(ACTION_WORDS_5)}
 
 env = surround_v2.env(
     obs_type="ram",
-    full_action_space=True,
+    full_action_space=False,
     max_cycles=MAX_CYCLES,
     auto_rom_install_path=ROM_PATH,
     render_mode="rgb_array",
@@ -25,33 +27,18 @@ VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 print(f"Human agent: {HUMAN_AGENT} | AI agent: {AI_AGENT}")
 
-action_meanings = None
-if hasattr(env.unwrapped, "get_action_meanings"):
-    action_meanings = env.unwrapped.get_action_meanings()
-
 
 def get_human_action(action_space, action_names):
-    if action_names and "RIGHT" in action_names:
-        return action_names.index("RIGHT")
-    return 0
+    return ACTION_WORD_TO_ID["RIGHT"]
 
 
 def get_ai_action(action_space, action_names):
-    if action_names:
-        directional = [
-            action_names.index(name)
-            for name in ("UP", "RIGHT", "LEFT", "DOWN")
-            if name in action_names
-        ]
-        if directional:
-            return directional[action_space.sample() % len(directional)]
-    return action_space.sample()
+    directional = [ACTION_WORD_TO_ID[name] for name in ("UP", "RIGHT", "LEFT", "DOWN")]
+    return directional[action_space.sample() % len(directional)]
 
 
 env.reset()
 video_writer = imageio.get_writer(str(VIDEO_PATH), fps=VIDEO_FPS, macro_block_size=1)
-if action_meanings:
-    print("Action meanings:", action_meanings)
 try:
     for cycle_step in trange(MAX_CYCLES):
         agents_this_cycle = list(env.agents)
@@ -60,13 +47,12 @@ try:
         for _ in agents_this_cycle:
             agent = env.agent_selection
             observation, reward, termination, truncation, info = env.last()
-            # this is where you would insert your policy
             if termination or truncation:
                 action = None
             elif agent == HUMAN_AGENT:
-                action = get_human_action(env.action_space(agent), action_meanings)
+                action = get_human_action(env.action_space(agent), None)
             elif agent == AI_AGENT:
-                action = get_ai_action(env.action_space(agent), action_meanings)
+                action = get_ai_action(env.action_space(agent), None)
             else:
                 action = env.action_space(agent).sample()
             env.step(action)
