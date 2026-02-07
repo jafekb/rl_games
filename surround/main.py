@@ -7,7 +7,7 @@ ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 100000
 VIDEO_DIR = Path("video")
 VIDEO_PATH = VIDEO_DIR / "surround.mp4"
-VIDEO_FPS = 30
+VIDEO_FPS = 60
 
 env = surround_v2.env(
     obs_type="ram",
