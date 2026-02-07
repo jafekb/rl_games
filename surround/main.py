@@ -2,15 +2,16 @@ from pathlib import Path
 
 import imageio.v2 as imageio
 from pettingzoo.atari import surround_v2
+from tqdm import trange
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
-MAX_CYCLES = 100000
+MAX_CYCLES = 10000
 VIDEO_DIR = Path("video")
 VIDEO_PATH = VIDEO_DIR / "surround.mp4"
 VIDEO_FPS = 120
 FRAME_STRIDE = 4
-HUMAN_AGENT = "agent_0"
-AI_AGENT = "agent_1"
+HUMAN_AGENT = "second_0"
+AI_AGENT = "first_0"
 
 env = surround_v2.env(
     obs_type="ram",
@@ -22,11 +23,7 @@ env = surround_v2.env(
 
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
-if hasattr(env, "possible_agents") and env.possible_agents:
-    if len(env.possible_agents) >= 2:
-        HUMAN_AGENT, AI_AGENT = env.possible_agents[:2]
-        HUMAN_AGENT, AI_AGENT = AI_AGENT, HUMAN_AGENT
-    print(f"Human agent: {HUMAN_AGENT} | AI agent: {AI_AGENT}")
+print(f"Human agent: {HUMAN_AGENT} | AI agent: {AI_AGENT}")
 
 action_meanings = None
 if hasattr(env.unwrapped, "get_action_meanings"):
@@ -52,11 +49,11 @@ def get_ai_action(action_space, action_names):
 
 
 env.reset()
-video_writer = imageio.get_writer(str(VIDEO_PATH), fps=VIDEO_FPS)
+video_writer = imageio.get_writer(str(VIDEO_PATH), fps=VIDEO_FPS, macro_block_size=1)
 if action_meanings:
     print("Action meanings:", action_meanings)
 try:
-    for cycle_step in range(MAX_CYCLES):
+    for cycle_step in trange(MAX_CYCLES):
         agents_this_cycle = list(env.agents)
         if not agents_this_cycle:
             break
@@ -73,7 +70,6 @@ try:
             else:
                 action = env.action_space(agent).sample()
             env.step(action)
-        print(f"{cycle_step=}")
         if cycle_step % FRAME_STRIDE == 0:
             frame = env.render()
             if frame is not None:
