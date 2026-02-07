@@ -196,7 +196,7 @@ def _clip_state(features: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(clipped)
 
 
-def greedy_q_policy(action_space, observation, info):
+def greedy_q_policy(action_space, observation, info, last_action):
     global _Q_TABLE_CACHE, _EXTRACTOR_CACHE
 
     if _Q_TABLE_CACHE is None:
