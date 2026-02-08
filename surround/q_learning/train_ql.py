@@ -148,7 +148,8 @@ class QLearning:
         self.epsilon_decay_steps = epsilon_decay_steps
         self.epsilon = epsilon_start
         self.episodes = episodes
-        self.n_actions = 4
+        # We removed NOOP from the action space
+        self.n_actions = self.env.action_space.n - 1
 
         self.q_table: dict[tuple[int, ...], np.ndarray] = {}
         self.unique_states: set[tuple[int, ...]] = set()
