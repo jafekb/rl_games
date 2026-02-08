@@ -32,6 +32,7 @@ GRID_COLS = 38
 EMPTY_CELL = 0
 WALL_CELL = 1
 EGO_CELL = 2
+FRAME_SKIP = 8
 
 
 def total_possible_states(state_mode: str) -> int:
@@ -48,6 +49,7 @@ def make_env(difficulty: int, mode: int):
         full_action_space=False,
         difficulty=difficulty,
         mode=mode,
+        frameskip=FRAME_SKIP,
     )
 
 
