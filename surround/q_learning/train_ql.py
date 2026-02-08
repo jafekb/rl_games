@@ -5,9 +5,9 @@ import ale_py
 import cv2
 import gymnasium as gym
 import numpy as np
-from actions import ACTION_WORD_TO_ID
 from tqdm import trange
 
+from surround.actions import ACTION_WORD_TO_ID
 from surround.utils.video_extract_locations import get_location
 
 DIFFICULTY = 0
