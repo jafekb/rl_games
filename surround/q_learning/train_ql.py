@@ -1,13 +1,11 @@
 import json
 from pathlib import Path
-from typing import Callable
 
 import ale_py
 import gymnasium as gym
 import numpy as np
 from tqdm import trange
 
-from surround.utils.ram_probe import create_extractor
 from surround.utils.video_extract_locations import get_location
 
 DIFFICULTY = 0
@@ -16,7 +14,6 @@ SEED = 0
 MAX_CYCLES = 10_000
 ALPHA = 0.1
 GAMMA = 0.99
-USE_MULTI_AGENT_EXTRACTOR = True
 CLIP_MAX = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 EPSILON_START = 1.0
@@ -27,6 +24,8 @@ STEP_REWARD = 0.01
 STATE_MODE = "surround_window"
 WINDOW_SIZE = 7
 DEBUG_STATE = False
+GRID_ROWS = 18
+GRID_COLS = 38
 
 EMPTY_CELL = 0
 WALL_CELL = 1
@@ -34,8 +33,6 @@ EGO_CELL = 2
 
 
 def total_possible_states(state_mode: str) -> int:
-    if state_mode == "ram":
-        return (CLIP_MAX + 1) ** 4 * (2 * CLIP_MAX + 1) ** 2
     if state_mode == "surround_window":
         window_cells = WINDOW_SIZE * WINDOW_SIZE
         window_states = 3**window_cells
@@ -47,10 +44,9 @@ def total_possible_states(state_mode: str) -> int:
 
 def make_env(difficulty: int, mode: int, state_mode: str):
     gym.register_envs(ale_py)
-    obs_type = "ram" if state_mode == "ram" else "rgb"
     return gym.make(
         "ALE/Surround-v5",
-        obs_type=obs_type,
+        obs_type="rgb",
         full_action_space=False,
         difficulty=difficulty,
         mode=mode,
@@ -112,46 +108,79 @@ def _window_features(
     return features
 
 
+def get_state_tuple(locations) -> tuple[int, ...]:
+    """
+    Builds a state tuple from the locations of the ego, opponent, and walls.
+
+    Args:
+        locations: The locations of the ego, opponent, and walls.
+
+    Returns:
+        A tuple of the state (d_up, d_down, d_left, d_right, rel_x, rel_y).
+        There are a total of 2*2*2*2*3*3 = 144 possible states:
+        - d_up: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - d_down: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - d_left: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - d_right: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - rel_x: 0 if the opponent is to the left of the ego, 1 if the opponent is in the
+            same column as the ego, 2 if the opponent is to the right of the ego.
+        - rel_y: 0 if the opponent is above the ego, 1 if the opponent is in the same row as
+            the ego, 2 if the opponent is below the ego
+    """
+    ego_row, ego_col = locations["ego"]
+    opp_row, opp_col = locations["opp"]
+    wall_set = locations["walls"]
+    collisions = (
+        wall_set | {(opp_row, opp_col)} if opp_row is not None and opp_col is not None else wall_set
+    )
+
+    # 1. Survival Features (4 Binary Flags)
+    # Check adjacent tiles for walls or trails
+    d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
+    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
+    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
+
+    # 2. Relational Features (Map -1, 0, 1 to 0, 1, 2)
+    # We shift the values so they are non-negative for the index math
+    if opp_col < ego_col:
+        rel_x = 0  # Opponent is Left
+    elif opp_col > ego_col:
+        rel_x = 2  # Opponent is Right
+    else:
+        rel_x = 1  # Same Column
+
+    if opp_row < ego_row:
+        rel_y = 0  # Opponent is Above
+    elif opp_row > ego_row:
+        rel_y = 2  # Opponent is Below
+    else:
+        rel_y = 1  # Same Row
+
+    return (d_up, d_down, d_left, d_right, rel_x, rel_y)
+
+
 def build_state_from_observation(
     observation: np.ndarray,
     *,
     state_mode: str,
-    ram_extractor: Callable[[np.ndarray], tuple[int, ...]] | None = None,
 ) -> tuple[int, ...]:
+    """
+    Builds a state from an observation.
+
+    Args:
+        observation: The observation to build a state from.
+        state_mode: The state mode to use.
+
+    Returns:
+        A tuple of the state: ()
+    """
     if state_mode == "ram":
-        if ram_extractor is None:
-            raise RuntimeError("RAM extractor not initialized.")
-        return _clip_state(ram_extractor(observation))
-
+        raise ValueError("RAM state mode is not supported.")
     locations = get_location(observation, color_space="rgb")
-    ego = locations["ego"]
-    opp = locations["opp"]
-    walls = locations["walls"]
-    if ego is None or opp is None or walls is None:
-        return (0,) * (WINDOW_SIZE * WINDOW_SIZE + 4)
-
-    walls_set = set(walls)
-    ego_set = {ego}
-    opp_set = {opp}
-    grid = _build_occupancy_grid(walls, ego, opp)
-    window = _window_features(grid, opp)
-    dx = _clip_delta(opp[1] - ego[1])
-    dy = _clip_delta(opp[0] - ego[0])
-    ego_exits = _count_exits(ego, walls_set, opp_set)
-    opp_exits = _count_exits(opp, walls_set, ego_set)
-    state = tuple(*window, dx, dy, ego_exits, opp_exits)
+    state = get_state_tuple(locations)
     if DEBUG_STATE:
-        print(
-            "state_debug",
-            {
-                "ego": ego,
-                "opp": opp,
-                "dx": dx,
-                "dy": dy,
-                "ego_exits": ego_exits,
-                "opp_exits": opp_exits,
-            },
-        )
+        print("state_tuple", state)
     return state
 
 
@@ -164,7 +193,6 @@ class QLearning:
         episodes: int,
         state_mode: str,
     ):
-        print("Initializing Q-Learning...")
         self.state_mode = state_mode
         self.env = make_env(difficulty=0, mode=0, state_mode=state_mode)
         self.epsilon_start = epsilon_start
@@ -173,17 +201,8 @@ class QLearning:
         self.epsilon = epsilon_start
         self.episodes = episodes
         self.n_actions = self.env.action_space.n
-        self.ram_extractor: Callable[[np.ndarray], tuple[int, ...]] | None = None
-        if self.state_mode == "ram":
-            self.ram_extractor = create_extractor(
-                use_multi_agent=USE_MULTI_AGENT_EXTRACTOR,
-                difficulty=DIFFICULTY,
-                mode=MODE,
-            )
 
-        print("creating q-table...")
         self.q_table: dict[tuple[int, ...], np.ndarray] = {}
-        print("q-table created")
         self.unique_states: set[tuple[int, ...]] = set()
         self.total_steps = 0
         self.random_steps = 0
@@ -195,7 +214,6 @@ class QLearning:
         return build_state_from_observation(
             observation,
             state_mode=self.state_mode,
-            ram_extractor=self.ram_extractor,
         )
 
     def _get_q(self, state: tuple[int, ...]) -> np.ndarray:
@@ -245,7 +263,6 @@ class QLearning:
         self.episode_returns.append(episode_return)
 
     def train(self):
-        print("Training Q-Learning...")
         if self.epsilon_start <= 0:
             decay_rate = 0.0
         else:
@@ -258,8 +275,7 @@ class QLearning:
                 self.epsilon_start * np.exp(-decay_rate * iternum),
             )
             self.run_episode(episode_index=iternum)
-            print("q_table size:", len(self.q_table))
-            if (iternum + 1) % 50 == 0:
+            if (iternum + 1) % 100 == 0:
                 self.save_q_table(Q_TABLE_PATH)
         self.save_q_table(Q_TABLE_PATH)
 
@@ -300,7 +316,6 @@ class QLearning:
 
 
 _Q_TABLE_CACHE: dict[tuple[int, ...], np.ndarray] | None = None
-_RAM_EXTRACTOR: Callable[[np.ndarray], tuple[int, ...]] | None = None
 _STATS = {"valid": []}
 
 
@@ -313,32 +328,15 @@ def load_q_table(path: Path) -> dict[tuple[int, ...], np.ndarray]:
     return states
 
 
-def _clip_state(features: tuple[int, ...]) -> tuple[int, ...]:
-    clipped = []
-    for idx, value in enumerate(features):
-        if idx < 4:
-            clipped.append(int(np.clip(value, 0, CLIP_MAX)))
-        else:
-            clipped.append(int(np.clip(value, -CLIP_MAX, CLIP_MAX)))
-    return tuple(clipped)
-
-
 def greedy_q_policy(action_space, observation, info, last_action):
-    global _Q_TABLE_CACHE, _RAM_EXTRACTOR, _STATS
+    global _Q_TABLE_CACHE, _STATS
 
     if _Q_TABLE_CACHE is None:
         _Q_TABLE_CACHE = load_q_table(Q_TABLE_PATH)
-    if _RAM_EXTRACTOR is None and STATE_MODE == "ram":
-        _RAM_EXTRACTOR = create_extractor(
-            use_multi_agent=USE_MULTI_AGENT_EXTRACTOR,
-            difficulty=DIFFICULTY,
-            mode=MODE,
-        )
 
     state = build_state_from_observation(
         observation,
         state_mode=STATE_MODE,
-        ram_extractor=_RAM_EXTRACTOR,
     )
     q_values = _Q_TABLE_CACHE.get(state)
     if q_values is None:
