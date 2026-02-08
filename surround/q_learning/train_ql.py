@@ -5,6 +5,7 @@ import ale_py
 import cv2
 import gymnasium as gym
 import numpy as np
+from actions import ACTION_WORD_TO_ID
 from tqdm import trange
 
 from surround.utils.video_extract_locations import get_location
@@ -180,7 +181,7 @@ class QLearning:
 
     def run_episode(self, episode_index: int):
         observation, _info = self.env.reset(seed=SEED + episode_index)
-        last_action = 1
+        last_action = ACTION_WORD_TO_ID["LEFT"]
         state = self._get_state(observation, last_action)
         self.unique_states.add(state)
         episode_steps = 0
