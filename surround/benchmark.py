@@ -50,7 +50,7 @@ def make_env(difficulty: int, mode: int):
 def run_episode(env, policy, seed, video_writer, episode_index: int):
     observation, info = env.reset(seed=seed)
     total = 0.0
-    last_action = 0
+    last_action = 1
     for cycle_step in trange(
         MAX_CYCLES,
         desc=f"Episode {episode_index + 1}/{EPISODES}",

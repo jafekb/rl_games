@@ -1,11 +1,11 @@
 ## Q-Learning State and Actions (Surround)
 
-### State Vector (6 values)
+### State Vector (7 values)
 
 
 See [this doc](https://docs.google.com/document/d/1oITOzKycnmKilUiKKwH4EgwXyeOtTVNaefD7BhEul1U/edit?tab=t.6lak97m9056e) for more context and results.
 
-The Q-learning state is a 6-element tuple derived from the RAM extractor:
+The Q-learning state is a 7-element tuple derived from the RAM extractor:
 
 1. Left distance to nearest wall (non-negative)
 2. Right distance to nearest wall (non-negative)
@@ -13,6 +13,7 @@ The Q-learning state is a 6-element tuple derived from the RAM extractor:
 4. Down distance to nearest wall (non-negative)
 5. dx to opponent (opponent_x - self_x, signed)
 6. dy to opponent (opponent_y - self_y, signed)
+7. last_action (1..4)
 
 Clipping is applied to reduce state space size:
 
@@ -21,14 +22,13 @@ Clipping is applied to reduce state space size:
 
 Total possible states with this clipping:
 
-- `8^4 * 15^2 = 921,600`
+- `8^4 * 15^2 * 4 = 3,686,400`
 
-### Action Choices (5 values)
+### Action Choices (4 values)
 
 The action space uses the minimal ALE action set for `ALE/Surround-v5` with
 `full_action_space=False`. The action index order is:
 
-0. NOOP
 1. UP
 2. RIGHT
 3. LEFT

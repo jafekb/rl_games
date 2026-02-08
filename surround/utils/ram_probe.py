@@ -11,12 +11,12 @@ import gymnasium as gym
 import numpy as np
 
 ACTION_IDS = {
-    "NOOP": 0,
     "UP": 1,
     "RIGHT": 2,
     "LEFT": 3,
     "DOWN": 4,
 }
+IDLE_ACTION = ACTION_IDS["UP"]
 
 PRE_TURN_STEPS = 3
 
@@ -86,7 +86,7 @@ def run_sweep(
         if terminated or truncated:
             break
         for _ in range(noop_every):
-            observation, _reward, terminated, truncated, _info = env.step(ACTION_IDS["NOOP"])
+            observation, _reward, terminated, truncated, _info = env.step(IDLE_ACTION)
             frames.append(observation.copy())
             if terminated or truncated:
                 break
@@ -732,7 +732,7 @@ def discover_position_indices(
 
     noop_values = run_sweep(
         env,
-        ACTION_IDS["NOOP"],
+        IDLE_ACTION,
         steps,
         seed=seed + 99,
         noop_every=noop_every,
@@ -1033,7 +1033,7 @@ def discover_and_build_extractor(
     """
     Runs discovery and returns a feature extractor closure.
 
-    This uses action sweeps to find self position bytes and a NOOP sweep to
+    This uses action sweeps to find self position bytes and an idle sweep to
     guess opponent bytes by variance. The opponent detection is heuristic and
     should be validated after inspection.
     """
@@ -1044,7 +1044,7 @@ def discover_and_build_extractor(
             top_n=top_n,
             difficulty=difficulty,
             mode=mode,
-            fixed_action=ACTION_IDS["NOOP"],
+            fixed_action=IDLE_ACTION,
             noop_every=noop_every,
         )
     else:
@@ -1109,7 +1109,7 @@ def main() -> None:
         "--noop-every",
         type=int,
         default=1,
-        help="Number of NOOP steps to insert after each action.",
+        help="Number of idle steps to insert after each action.",
     )
     parser.add_argument(
         "--multi-agent",
@@ -1141,11 +1141,11 @@ def main() -> None:
             top_n=args.top,
             difficulty=args.difficulty,
             mode=args.mode,
-            fixed_action=ACTION_IDS["NOOP"],
+            fixed_action=IDLE_ACTION,
             noop_every=args.noop_every,
             seed_trials=args.seed_trials,
         )
-        print("\nMulti-agent validation (agent0 moving, agent1 NOOP)")
+        print("\nMulti-agent validation (agent0 moving, agent1 idle)")
         print_candidates("agent0 RIGHT", stats["self_right"], corr_sign=1)
         print_candidates("agent0 LEFT", stats["self_left"], corr_sign=-1)
         print_candidates("agent0 UP", stats["self_up"], corr_sign=-1)
@@ -1159,7 +1159,7 @@ def main() -> None:
             stats["self_up"],
             stats["self_down"],
         )
-        print("\nMulti-agent validation (agent1 moving, agent0 NOOP)")
+        print("\nMulti-agent validation (agent1 moving, agent0 idle)")
         print_candidates("agent1 RIGHT", stats["opp_right"], corr_sign=1)
         print_candidates("agent1 LEFT", stats["opp_left"], corr_sign=-1)
         print_candidates("agent1 UP", stats["opp_up"], corr_sign=-1)

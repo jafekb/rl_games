@@ -2,7 +2,7 @@ from typing import Set
 
 import cv2
 
-from surround.actions import ACTION_WORD_TO_ID, ACTION_WORDS_5
+from surround.actions import ACTION_WORD_TO_ID, ACTION_WORDS_4
 from surround.utils.video_extract_locations import get_location
 
 GRID_ROWS = 18
@@ -11,11 +11,11 @@ GRID_COLS = 38
 
 def get_action(
     locations: dict[str, tuple[int, int] | Set[tuple[int, int]] | None], last_action: str
-) -> tuple[int, int]:
+) -> str:
     collisions = locations["walls"] | {locations["opp"]} if locations["opp"] is not None else set()
     ego = locations["ego"]
     if ego is None:
-        return "NOOP"
+        return "UP"
     collision_up = (ego[0] - 1, ego[1]) in collisions or ego[0] <= 0
     collision_down = (ego[0] + 1, ego[1]) in collisions or ego[0] >= GRID_ROWS - 1
     collision_left = (ego[0], ego[1] - 1) in collisions or ego[1] <= 0
@@ -32,12 +32,13 @@ def get_action(
         return "DOWN"
     if not collision_up and last_action != "DOWN":
         return "UP"
-    return "NOOP"
+    return "UP"
 
 
 def snake_policy(action_space, observation, info, last_action) -> int:
     # my extractor function inherits cv2's BGR convention.
     frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
     locations = get_location(frame)
-    action = get_action(locations, ACTION_WORDS_5[last_action])
+    safe_action = max(1, min(last_action, len(ACTION_WORDS_4)))
+    action = get_action(locations, ACTION_WORDS_4[safe_action - 1])
     return ACTION_WORD_TO_ID[action]
