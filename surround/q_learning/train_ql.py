@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import ale_py
+import cv2
 import gymnasium as gym
 import numpy as np
 from tqdm import trange
@@ -21,7 +22,7 @@ EPSILON_MIN = 0.05
 EPSILON_DECAY_STEPS = 1000
 EPISODES = 1_000_000
 STEP_REWARD = 0.01
-STATE_MODE = "surround_window"
+STATE_MODE = "state_tuple"
 WINDOW_SIZE = 7
 DEBUG_STATE = False
 GRID_ROWS = 18
@@ -33,16 +34,12 @@ EGO_CELL = 2
 
 
 def total_possible_states(state_mode: str) -> int:
-    if state_mode == "surround_window":
-        window_cells = WINDOW_SIZE * WINDOW_SIZE
-        window_states = 3**window_cells
-        delta_states = (2 * CLIP_MAX + 1) ** 2
-        exit_states = 5 * 5
-        return window_states * delta_states * exit_states
+    if state_mode == "state_tuple":
+        return 144  # 2*2*2*2*3*3
     raise ValueError(f"Unknown state mode: {state_mode}")
 
 
-def make_env(difficulty: int, mode: int, state_mode: str):
+def make_env(difficulty: int, mode: int):
     gym.register_envs(ale_py)
     return gym.make(
         "ALE/Surround-v5",
@@ -72,6 +69,9 @@ def get_state_tuple(locations) -> tuple[int, ...]:
         - rel_y: 0 if the opponent is above the ego, 1 if the opponent is in the same row as
             the ego, 2 if the opponent is below the ego
     """
+    if locations["ego"] is None or locations["opp"] is None:
+        # Sometimes this happens if the game ends.
+        return (1, 1, 1, 1, 1, 1)
     ego_row, ego_col = locations["ego"]
     opp_row, opp_col = locations["opp"]
     wall_set = locations["walls"]
@@ -122,7 +122,8 @@ def build_state_from_observation(
     """
     if state_mode == "ram":
         raise ValueError("RAM state mode is not supported.")
-    locations = get_location(observation, color_space="rgb")
+    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
+    locations = get_location(frame)
     state = get_state_tuple(locations)
     if DEBUG_STATE:
         print("state_tuple", state)
@@ -139,7 +140,7 @@ class QLearning:
         state_mode: str,
     ):
         self.state_mode = state_mode
-        self.env = make_env(difficulty=0, mode=0, state_mode=state_mode)
+        self.env = make_env(difficulty=0, mode=0)
         self.epsilon_start = epsilon_start
         self.epsilon_min = epsilon_min
         self.epsilon_decay_steps = epsilon_decay_steps
