@@ -53,61 +53,6 @@ def make_env(difficulty: int, mode: int, state_mode: str):
     )
 
 
-def _clip_delta(value: int) -> int:
-    return int(np.clip(value, -CLIP_MAX, CLIP_MAX))
-
-
-def _build_occupancy_grid(
-    walls: list[tuple[int, int]],
-    ego: tuple[int, int],
-    opp: tuple[int, int],
-) -> list[list[int]]:
-    grid = [[EMPTY_CELL for _ in range(38)] for _ in range(18)]
-    for row, col in walls:
-        if 0 <= row < 18 and 0 <= col < 38:
-            grid[row][col] = WALL_CELL
-    erow, ecol = ego
-    if 0 <= erow < 18 and 0 <= ecol < 38:
-        grid[erow][ecol] = EGO_CELL
-    return grid
-
-
-def _count_exits(
-    position: tuple[int, int],
-    walls: set[tuple[int, int]],
-    blocked: set[tuple[int, int]],
-) -> int:
-    row, col = position
-    exits = 0
-    for drow, dcol in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-        nrow = row + drow
-        ncol = col + dcol
-        if not (0 <= nrow < 18 and 0 <= ncol < 38):
-            continue
-        if (nrow, ncol) in walls or (nrow, ncol) in blocked:
-            continue
-        exits += 1
-    return exits
-
-
-def _window_features(
-    grid: list[list[int]],
-    center: tuple[int, int],
-) -> list[int]:
-    radius = WINDOW_SIZE // 2
-    features: list[int] = []
-    center_row, center_col = center
-    for drow in range(-radius, radius + 1):
-        for dcol in range(-radius, radius + 1):
-            row = center_row + drow
-            col = center_col + dcol
-            if 0 <= row < 18 and 0 <= col < 38:
-                features.append(grid[row][col])
-            else:
-                features.append(WALL_CELL)
-    return features
-
-
 def get_state_tuple(locations) -> tuple[int, ...]:
     """
     Builds a state tuple from the locations of the ego, opponent, and walls.
