@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Set
 
 import cv2
 import numpy as np
@@ -15,8 +16,8 @@ GRID_COLS = 38
 VISUALIZE = False
 
 
-def mask_to_grid_locations(mask: np.ndarray) -> list[tuple[int, int]]:
-    locations: list[tuple[int, int]] = []
+def mask_to_grid_locations(mask: np.ndarray) -> Set[tuple[int, int]]:
+    locations: Set[tuple[int, int]] = set()
     for row in range(GRID_ROWS):
         row_start = row * X_SIZE
         row_end = row_start + X_SIZE
@@ -25,15 +26,24 @@ def mask_to_grid_locations(mask: np.ndarray) -> list[tuple[int, int]]:
             col_end = col_start + Y_SIZE
             cell = mask[row_start:row_end, col_start:col_end]
             if np.any(cell):
-                locations.append((row, col))
+                locations.add((row, col))
     return locations
 
 
-def get_location(image: np.ndarray) -> dict[str, tuple[int, int]]:
+def get_location(image: np.ndarray) -> dict:
+    """
+    Extracts the locations of the ego, opponent, and walls from an image.
+
+    Args:
+        image: The input game image in BGR format.
+
+    Returns:
+        A dictionary containing the locations of the ego, opponent, and walls.
+    """
     locations = {
         "ego": None,
         "opp": None,
-        "walls": None,
+        "walls": set(),
     }
     game = image[35:197, 4:156, :]
     ego = cv2.inRange(game, (90, 192, 180), (100, 197, 185))

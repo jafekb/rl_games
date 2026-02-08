@@ -1,3 +1,5 @@
+from typing import Set
+
 import cv2
 
 from surround.actions import ACTION_WORD_TO_ID, ACTION_WORDS_5
@@ -7,8 +9,10 @@ GRID_ROWS = 18
 GRID_COLS = 38
 
 
-def get_action(locations: dict[str, tuple[int, int]], last_action: str) -> tuple[int, int]:
-    collisions = locations["walls"] + [locations["opp"]]
+def get_action(
+    locations: dict[str, tuple[int, int] | Set[tuple[int, int]] | None], last_action: str
+) -> tuple[int, int]:
+    collisions = locations["walls"] | {locations["opp"]} if locations["opp"] is not None else set()
     ego = locations["ego"]
     if ego is None:
         return "NOOP"

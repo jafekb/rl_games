@@ -12,16 +12,14 @@ from tqdm import trange
 if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from surround.policies.random import random_policy
-from surround.policies.snake_baseline import snake_policy
+from surround.q_learning.train_ql import greedy_q_policy
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 100_000
-EPISODES = 20
+EPISODES = 5
 SEED = 0
 DIFFICULTY = 0
 MODE = 0
-POLICY = "human"
 RECORD_VIDEO = True
 VIDEO_DIR = Path("video")
 VIDEO_FPS = 120
@@ -29,10 +27,10 @@ FRAME_STRIDE = 4
 
 
 POLICIES = {
-    "random": random_policy,
+    # "random": random_policy,
     # "human": get_human_action,
-    # "q_learning": greedy_q_policy,
-    "snake": snake_policy,
+    "q_learning": greedy_q_policy,
+    # "snake": snake_policy,
 }
 
 
