@@ -67,9 +67,9 @@ def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
         A tuple of the state (d_up, d_down, d_left, d_right, rel_x, rel_y, last_action).
         There are a total of 2*2*2*2*3*3*4 = 576 possible states:
         - d_up: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - d_down: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - d_left: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
         - d_right: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - d_left: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - d_down: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
         - rel_x: 0 if the opponent is to the left of the ego, 1 if the opponent is in the
             same column as the ego, 2 if the opponent is to the right of the ego.
         - rel_y: 0 if the opponent is above the ego, 1 if the opponent is in the same row as
@@ -89,9 +89,9 @@ def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
     # 1. Survival Features (4 Binary Flags)
     # Check adjacent tiles for walls or trails
     d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
-    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
-    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
     d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
+    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
 
     # 2. Relational Features (Map -1, 0, 1 to 0, 1, 2)
     # We shift the values so they are non-negative for the index math
@@ -109,7 +109,7 @@ def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
     else:
         rel_y = 1  # Same Row
 
-    return (d_up, d_down, d_left, d_right, rel_x, rel_y, last_action)
+    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
 
 
 def build_state_from_observation(

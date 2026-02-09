@@ -9,9 +9,9 @@ The Q-learning state is a 7-element tuple derived from the location extractor
 and the definitions in [`surround/actions.py`](surround/actions.py):
 
 1. D_UP (1 if ego is adjacent to a wall or out-of-bounds, else 0)
-2. D_DOWN (1 if ego is adjacent to a wall or out-of-bounds, else 0)
+2. D_RIGHT (1 if ego is adjacent to a wall or out-of-bounds, else 0)
 3. D_LEFT (1 if ego is adjacent to a wall or out-of-bounds, else 0)
-4. D_RIGHT (1 if ego is adjacent to a wall or out-of-bounds, else 0)
+4. D_DOWN (1 if ego is adjacent to a wall or out-of-bounds, else 0)
 5. REL_X_OPP (0=opponent left, 1=same column, 2=opponent right)
 6. REL_Y_OPP (0=opponent above, 1=same row, 2=opponent below)
 7. last_action (1..4 for UP/RIGHT/LEFT/DOWN)
