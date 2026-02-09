@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import ale_py
@@ -7,6 +8,7 @@ import gymnasium as gym
 import numpy as np
 from tqdm import trange
 
+from surround.actions import ACTION_WORD_TO_ID
 from surround.utils.video_extract_locations import get_location
 
 DIFFICULTY = 0
@@ -31,11 +33,12 @@ GRID_COLS = 38
 EMPTY_CELL = 0
 WALL_CELL = 1
 EGO_CELL = 2
+FRAME_SKIP = 8
 
 
 def total_possible_states(state_mode: str) -> int:
     if state_mode == "state_tuple":
-        return 144  # 2*2*2*2*3*3
+        return 576  # 2*2*2*2*3*3*4
     raise ValueError(f"Unknown state mode: {state_mode}")
 
 
@@ -47,10 +50,11 @@ def make_env(difficulty: int, mode: int):
         full_action_space=False,
         difficulty=difficulty,
         mode=mode,
+        frameskip=FRAME_SKIP,
     )
 
 
-def get_state_tuple(locations) -> tuple[int, ...]:
+def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
     """
     Builds a state tuple from the locations of the ego, opponent, and walls.
 
@@ -58,8 +62,8 @@ def get_state_tuple(locations) -> tuple[int, ...]:
         locations: The locations of the ego, opponent, and walls.
 
     Returns:
-        A tuple of the state (d_up, d_down, d_left, d_right, rel_x, rel_y).
-        There are a total of 2*2*2*2*3*3 = 144 possible states:
+        A tuple of the state (d_up, d_down, d_left, d_right, rel_x, rel_y, last_action).
+        There are a total of 2*2*2*2*3*3*4 = 576 possible states:
         - d_up: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
         - d_down: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
         - d_left: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
@@ -68,10 +72,11 @@ def get_state_tuple(locations) -> tuple[int, ...]:
             same column as the ego, 2 if the opponent is to the right of the ego.
         - rel_y: 0 if the opponent is above the ego, 1 if the opponent is in the same row as
             the ego, 2 if the opponent is below the ego
+        - last_action: 1..4 for UP/RIGHT/LEFT/DOWN
     """
     if locations["ego"] is None or locations["opp"] is None:
         # Sometimes this happens if the game ends.
-        return (1, 1, 1, 1, 1, 1)
+        return (1, 1, 1, 1, 1, 1, last_action)
     ego_row, ego_col = locations["ego"]
     opp_row, opp_col = locations["opp"]
     wall_set = locations["walls"]
@@ -102,11 +107,12 @@ def get_state_tuple(locations) -> tuple[int, ...]:
     else:
         rel_y = 1  # Same Row
 
-    return (d_up, d_down, d_left, d_right, rel_x, rel_y)
+    return (d_up, d_down, d_left, d_right, rel_x, rel_y, last_action)
 
 
 def build_state_from_observation(
     observation: np.ndarray,
+    last_action: int,
     *,
     state_mode: str,
 ) -> tuple[int, ...]:
@@ -124,7 +130,7 @@ def build_state_from_observation(
         raise ValueError("RAM state mode is not supported.")
     frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
     locations = get_location(frame)
-    state = get_state_tuple(locations)
+    state = get_state_tuple(locations, last_action)
     if DEBUG_STATE:
         print("state_tuple", state)
     return state
@@ -146,7 +152,8 @@ class QLearning:
         self.epsilon_decay_steps = epsilon_decay_steps
         self.epsilon = epsilon_start
         self.episodes = episodes
-        self.n_actions = self.env.action_space.n
+        # We removed NOOP from the action space
+        self.n_actions = self.env.action_space.n - 1
 
         self.q_table: dict[tuple[int, ...], np.ndarray] = {}
         self.unique_states: set[tuple[int, ...]] = set()
@@ -156,9 +163,10 @@ class QLearning:
         self.episode_lengths: list[int] = []
         self.episode_returns: list[float] = []
 
-    def _get_state(self, observation: np.ndarray) -> tuple[int, ...]:
+    def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
         return build_state_from_observation(
             observation,
+            last_action,
             state_mode=self.state_mode,
         )
 
@@ -167,14 +175,17 @@ class QLearning:
             self.q_table[state] = np.ones(self.n_actions, dtype=np.float32)
         return self.q_table[state]
 
-    def _get_action(self, state: tuple[int, ...]) -> tuple[int, bool]:
+    def _get_action(self, state: tuple[int, ...]) -> tuple[int, int, bool]:
         if np.random.random() < self.epsilon:
-            return int(self.env.action_space.sample()), True
-        return int(np.argmax(self._get_q(state))), False
+            action_index = int(np.random.randint(0, self.n_actions))
+            return action_index + 1, action_index, True
+        action_index = int(np.argmax(self._get_q(state)))
+        return action_index + 1, action_index, False
 
     def run_episode(self, episode_index: int):
         observation, _info = self.env.reset(seed=SEED + episode_index)
-        state = self._get_state(observation)
+        last_action = ACTION_WORD_TO_ID["LEFT"]
+        state = self._get_state(observation, last_action)
         self.unique_states.add(state)
         episode_steps = 0
         episode_return = 0.0
@@ -182,16 +193,16 @@ class QLearning:
             MAX_CYCLES,
             leave=False,
         ):
-            action, is_random = self._get_action(state)
-            observation, reward, terminated, truncated, _info = self.env.step(action)
+            action_id, action_index, is_random = self._get_action(state)
+            observation, reward, terminated, truncated, _info = self.env.step(action_id)
             if not (terminated or truncated):
                 reward += STEP_REWARD
 
-            next_state = self._get_state(observation)
+            next_state = self._get_state(observation, action_id)
             q_values = self._get_q(state)
             next_best = float(np.max(self._get_q(next_state)))
-            q_values[action] = q_values[action] + ALPHA * (
-                reward + GAMMA * next_best - q_values[action]
+            q_values[action_index] = q_values[action_index] + ALPHA * (
+                reward + GAMMA * next_best - q_values[action_index]
             )
             state = next_state
             self.unique_states.add(state)
@@ -222,10 +233,10 @@ class QLearning:
             )
             self.run_episode(episode_index=iternum)
             if (iternum + 1) % 100 == 0:
-                self.save_q_table(Q_TABLE_PATH)
-        self.save_q_table(Q_TABLE_PATH)
+                self.save_q_table(Q_TABLE_PATH, episode_num=iternum)
+        self.save_q_table(Q_TABLE_PATH, episode_num=iternum)
 
-    def save_q_table(self, path: Path) -> None:
+    def save_q_table(self, path: Path, *, episode_num: int) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         total_states = total_possible_states(self.state_mode)
         q_table_size = len(self.q_table)
@@ -235,7 +246,9 @@ class QLearning:
         data = {
             "clip_max": CLIP_MAX,
             "analysis": {
-                "episodes": self.episodes,
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "episode_num": episode_num,
+                "max_episodes": self.episodes,
                 "max_cycles": MAX_CYCLES,
                 "epsilon": self.epsilon,
                 "state_mode": self.state_mode,
@@ -282,6 +295,7 @@ def greedy_q_policy(action_space, observation, info, last_action):
 
     state = build_state_from_observation(
         observation,
+        last_action,
         state_mode=STATE_MODE,
     )
     q_values = _Q_TABLE_CACHE.get(state)
@@ -289,11 +303,11 @@ def greedy_q_policy(action_space, observation, info, last_action):
         _STATS["valid"].append(0)
         with Path("stats.json").open("w") as f:
             json.dump(_STATS, f)
-        return int(action_space.sample())
+        return int(np.random.randint(1, 5))
     _STATS["valid"].append(1)
     with Path("stats.json").open("w") as f:
         json.dump(_STATS, f)
-    return int(np.argmax(q_values))
+    return int(np.argmax(q_values)) + 1
 
 
 if __name__ == "__main__":
