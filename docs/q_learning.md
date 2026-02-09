@@ -5,24 +5,20 @@
 
 See [this doc](https://docs.google.com/document/d/1oITOzKycnmKilUiKKwH4EgwXyeOtTVNaefD7BhEul1U/edit?tab=t.6lak97m9056e) for more context and results.
 
-The Q-learning state is a 7-element tuple derived from the RAM extractor:
+The Q-learning state is a 7-element tuple derived from the location extractor
+and the definitions in [`surround/actions.py`](surround/actions.py):
 
-1. Left distance to nearest wall (non-negative)
-2. Right distance to nearest wall (non-negative)
-3. Up distance to nearest wall (non-negative)
-4. Down distance to nearest wall (non-negative)
-5. dx to opponent (opponent_x - self_x, signed)
-6. dy to opponent (opponent_y - self_y, signed)
-7. last_action (1..4)
+1. D_UP (1 if ego is adjacent to a wall or out-of-bounds, else 0)
+2. D_DOWN (1 if ego is adjacent to a wall or out-of-bounds, else 0)
+3. D_LEFT (1 if ego is adjacent to a wall or out-of-bounds, else 0)
+4. D_RIGHT (1 if ego is adjacent to a wall or out-of-bounds, else 0)
+5. REL_X_OPP (0=opponent left, 1=same column, 2=opponent right)
+6. REL_Y_OPP (0=opponent above, 1=same row, 2=opponent below)
+7. last_action (1..4 for UP/RIGHT/LEFT/DOWN)
 
-Clipping is applied to reduce state space size:
+Total possible states with this encoding:
 
-- Distances are clipped to `[0, 7]`
-- dx/dy are clipped to `[-7, 7]`
-
-Total possible states with this clipping:
-
-- `8^4 * 15^2 * 4 = 3,686,400`
+- `2^4 * 3^2 * 4 = 576`
 
 ### Action Choices (4 values)
 

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import ale_py
@@ -232,10 +233,10 @@ class QLearning:
             )
             self.run_episode(episode_index=iternum)
             if (iternum + 1) % 100 == 0:
-                self.save_q_table(Q_TABLE_PATH)
-        self.save_q_table(Q_TABLE_PATH)
+                self.save_q_table(Q_TABLE_PATH, episode_num=iternum)
+        self.save_q_table(Q_TABLE_PATH, episode_num=iternum)
 
-    def save_q_table(self, path: Path) -> None:
+    def save_q_table(self, path: Path, *, episode_num: int) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         total_states = total_possible_states(self.state_mode)
         q_table_size = len(self.q_table)
@@ -245,7 +246,9 @@ class QLearning:
         data = {
             "clip_max": CLIP_MAX,
             "analysis": {
-                "episodes": self.episodes,
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "episode_num": episode_num,
+                "max_episodes": self.episodes,
                 "max_cycles": MAX_CYCLES,
                 "epsilon": self.epsilon,
                 "state_mode": self.state_mode,
