@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -165,6 +166,7 @@ class QLearning:
         self.episode_lengths: list[int] = []
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
+        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         self.writer = SummaryWriter(log_dir=str(log_dir))
         self.writer.add_custom_scalars(
             {
