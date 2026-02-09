@@ -45,3 +45,14 @@ stability and coverage:
   encourages survival and longer rollouts.
 - Environment similarity: set the difficulty to 0 during training instead of 1 so that the opponent is the same during training and eval.
 
+### TensorBoard (Logging)
+
+Training logs to `runs/surround_q_learning`. To view them:
+
+```
+uvx tensorboard --logdir runs
+```
+
+To see steps survived colored by outcome, open the Custom Scalars tab and select
+`episode/steps_survived_by_outcome`.
+

@@ -166,6 +166,20 @@ class QLearning:
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
         self.writer = SummaryWriter(log_dir=str(log_dir))
+        self.writer.add_custom_scalars(
+            {
+                "episode/steps_survived_by_outcome": {
+                    "steps_survived": [
+                        "Multiline",
+                        [
+                            "episode/steps_survived_win",
+                            "episode/steps_survived_loss",
+                            "episode/steps_survived_trunc",
+                        ],
+                    ]
+                }
+            }
+        )
 
     def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
         return build_state_from_observation(
@@ -237,14 +251,31 @@ class QLearning:
                 self.epsilon_start * np.exp(-decay_rate * episode_index),
             )
             self.run_episode(episode_index=episode_index, epsilon=epsilon)
+            episode_steps = self.episode_lengths[-1]
+            terminal_reward = self.episode_terminal_rewards[-1]
             self.writer.add_scalar(
                 "episode/steps_survived",
-                self.episode_lengths[-1],
+                episode_steps,
                 episode_index,
             )
             self.writer.add_scalar(
                 "episode/terminal_reward",
-                self.episode_terminal_rewards[-1],
+                terminal_reward,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/steps_survived_win",
+                episode_steps if terminal_reward > 0 else np.nan,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/steps_survived_loss",
+                episode_steps if terminal_reward < 0 else np.nan,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/steps_survived_trunc",
+                episode_steps if terminal_reward == 0 else np.nan,
                 episode_index,
             )
             self.writer.add_scalar(
