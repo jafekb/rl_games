@@ -209,6 +209,9 @@ class QLearning:
         self.unique_states.add(state)
         episode_steps = 0
         episode_return = 0.0
+        terminal_reward = 0.0
+        terminated = False
+        truncated = False
         for cycle_step in trange(
             MAX_CYCLES,
             leave=False,
@@ -235,10 +238,13 @@ class QLearning:
                 self.greedy_steps += 1
 
             if terminated or truncated:
+                terminal_reward = float(reward)
                 break
+        if not (terminated or truncated):
+            terminal_reward = 0.0
         self.episode_lengths.append(episode_steps)
         self.episode_returns.append(episode_return)
-        self.episode_terminal_rewards.append(float(reward))
+        self.episode_terminal_rewards.append(terminal_reward)
 
     def train(self):
         if self.epsilon_start <= 0:
