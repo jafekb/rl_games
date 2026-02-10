@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import ale_py
 import cv2
 import gymnasium as gym
 import numpy as np
+from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.actions import ACTION_WORD_TO_ID
@@ -19,6 +21,7 @@ ALPHA = 0.1
 GAMMA = 0.99
 CLIP_MAX = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
+LOG_DIR = Path("runs/surround_q_learning")
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY_STEPS = 1000
@@ -65,9 +68,9 @@ def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
         A tuple of the state (d_up, d_down, d_left, d_right, rel_x, rel_y, last_action).
         There are a total of 2*2*2*2*3*3*4 = 576 possible states:
         - d_up: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - d_down: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - d_left: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
         - d_right: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - d_left: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
+        - d_down: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
         - rel_x: 0 if the opponent is to the left of the ego, 1 if the opponent is in the
             same column as the ego, 2 if the opponent is to the right of the ego.
         - rel_y: 0 if the opponent is above the ego, 1 if the opponent is in the same row as
@@ -87,9 +90,9 @@ def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
     # 1. Survival Features (4 Binary Flags)
     # Check adjacent tiles for walls or trails
     d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
-    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
-    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
     d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
+    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
 
     # 2. Relational Features (Map -1, 0, 1 to 0, 1, 2)
     # We shift the values so they are non-negative for the index math
@@ -107,7 +110,7 @@ def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
     else:
         rel_y = 1  # Same Row
 
-    return (d_up, d_down, d_left, d_right, rel_x, rel_y, last_action)
+    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
 
 
 def build_state_from_observation(
@@ -144,13 +147,13 @@ class QLearning:
         epsilon_decay_steps: int,
         episodes: int,
         state_mode: str,
+        log_dir: Path = LOG_DIR,
     ):
         self.state_mode = state_mode
         self.env = make_env(difficulty=0, mode=0)
         self.epsilon_start = epsilon_start
         self.epsilon_min = epsilon_min
         self.epsilon_decay_steps = epsilon_decay_steps
-        self.epsilon = epsilon_start
         self.episodes = episodes
         # We removed NOOP from the action space
         self.n_actions = self.env.action_space.n - 1
@@ -162,6 +165,23 @@ class QLearning:
         self.greedy_steps = 0
         self.episode_lengths: list[int] = []
         self.episode_returns: list[float] = []
+        self.episode_terminal_rewards: list[float] = []
+        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
+        self.writer = SummaryWriter(log_dir=str(log_dir))
+        self.writer.add_custom_scalars(
+            {
+                "episode/steps_survived_by_outcome": {
+                    "steps_survived": [
+                        "Multiline",
+                        [
+                            "episode/steps_survived_win",
+                            "episode/steps_survived_loss",
+                            "episode/steps_survived_trunc",
+                        ],
+                    ]
+                }
+            }
+        )
 
     def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
         return build_state_from_observation(
@@ -175,25 +195,28 @@ class QLearning:
             self.q_table[state] = np.ones(self.n_actions, dtype=np.float32)
         return self.q_table[state]
 
-    def _get_action(self, state: tuple[int, ...]) -> tuple[int, int, bool]:
-        if np.random.random() < self.epsilon:
+    def _get_action(self, state: tuple[int, ...], epsilon: float) -> tuple[int, int, bool]:
+        if np.random.random() < epsilon:
             action_index = int(np.random.randint(0, self.n_actions))
             return action_index + 1, action_index, True
         action_index = int(np.argmax(self._get_q(state)))
         return action_index + 1, action_index, False
 
-    def run_episode(self, episode_index: int):
+    def run_episode(self, episode_index: int, epsilon: float):
         observation, _info = self.env.reset(seed=SEED + episode_index)
         last_action = ACTION_WORD_TO_ID["LEFT"]
         state = self._get_state(observation, last_action)
         self.unique_states.add(state)
         episode_steps = 0
         episode_return = 0.0
+        terminal_reward = 0.0
+        terminated = False
+        truncated = False
         for cycle_step in trange(
             MAX_CYCLES,
             leave=False,
         ):
-            action_id, action_index, is_random = self._get_action(state)
+            action_id, action_index, is_random = self._get_action(state, epsilon)
             observation, reward, terminated, truncated, _info = self.env.step(action_id)
             if not (terminated or truncated):
                 reward += STEP_REWARD
@@ -215,9 +238,13 @@ class QLearning:
                 self.greedy_steps += 1
 
             if terminated or truncated:
+                terminal_reward = float(reward)
                 break
+        if not (terminated or truncated):
+            terminal_reward = 0.0
         self.episode_lengths.append(episode_steps)
         self.episode_returns.append(episode_return)
+        self.episode_terminal_rewards.append(terminal_reward)
 
     def train(self):
         if self.epsilon_start <= 0:
@@ -226,17 +253,50 @@ class QLearning:
             decay_rate = np.log(self.epsilon_start / self.epsilon_min) / max(
                 self.epsilon_decay_steps, 1
             )
-        for iternum in trange(self.episodes):
-            self.epsilon = max(
+        for episode_index in trange(self.episodes):
+            epsilon = max(
                 self.epsilon_min,
-                self.epsilon_start * np.exp(-decay_rate * iternum),
+                self.epsilon_start * np.exp(-decay_rate * episode_index),
             )
-            self.run_episode(episode_index=iternum)
-            if (iternum + 1) % 100 == 0:
-                self.save_q_table(Q_TABLE_PATH, episode_num=iternum)
-        self.save_q_table(Q_TABLE_PATH, episode_num=iternum)
+            self.run_episode(episode_index=episode_index, epsilon=epsilon)
+            episode_steps = self.episode_lengths[-1]
+            terminal_reward = self.episode_terminal_rewards[-1]
+            self.writer.add_scalar(
+                "episode/steps_survived",
+                episode_steps,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/terminal_reward",
+                terminal_reward,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/steps_survived_win",
+                episode_steps if terminal_reward > 0 else np.nan,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/steps_survived_loss",
+                episode_steps if terminal_reward < 0 else np.nan,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/steps_survived_trunc",
+                episode_steps if terminal_reward == 0 else np.nan,
+                episode_index,
+            )
+            self.writer.add_scalar(
+                "episode/epsilon",
+                epsilon,
+                episode_index,
+            )
+            if (episode_index + 1) % 100 == 0:
+                self.save_q_table(Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon)
+        self.save_q_table(Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon)
+        self.writer.close()
 
-    def save_q_table(self, path: Path, *, episode_num: int) -> None:
+    def save_q_table(self, path: Path, *, episode_index: int, epsilon: float) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         total_states = total_possible_states(self.state_mode)
         q_table_size = len(self.q_table)
@@ -247,10 +307,10 @@ class QLearning:
             "clip_max": CLIP_MAX,
             "analysis": {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "episode_num": episode_num,
+                "episode_index": episode_index,
                 "max_episodes": self.episodes,
                 "max_cycles": MAX_CYCLES,
-                "epsilon": self.epsilon,
+                "epsilon": epsilon,
                 "state_mode": self.state_mode,
                 "epsilon_start": self.epsilon_start,
                 "epsilon_min": self.epsilon_min,

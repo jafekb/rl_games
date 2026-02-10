@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from statistics import mean, pstdev
@@ -24,6 +25,7 @@ RECORD_VIDEO = True
 VIDEO_DIR = Path("video")
 VIDEO_FPS = 120
 FRAME_STRIDE = 4
+Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 
 
 POLICIES = {
@@ -82,6 +84,11 @@ def main() -> None:
     env = make_env(DIFFICULTY, MODE)
     try:
         results = {}
+        q_table_episodes = None
+        if Q_TABLE_PATH.exists():
+            data = json.loads(Q_TABLE_PATH.read_text(encoding="utf-8"))
+            analysis = data.get("analysis", {})
+            q_table_episodes = analysis.get("episode_index")
         for policy_name, policy in POLICIES.items():
             video_writer = None
             if RECORD_VIDEO:
@@ -110,7 +117,11 @@ def main() -> None:
 
     print(f"Episodes: {EPISODES}")
     for policy_name, stats in results.items():
-        print(f"{policy_name}: mean_return={stats['mean']:.2f} std={stats['std']:.2f}")
+        if policy_name == "q_learning" and q_table_episodes is not None:
+            name_label = f"{policy_name} ({q_table_episodes} episodes)"
+        else:
+            name_label = policy_name
+        print(f"{name_label}: mean_return={stats['mean']:.2f} std={stats['std']:.2f}")
 
 
 if __name__ == "__main__":
