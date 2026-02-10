@@ -5,15 +5,19 @@ Train a DQN agent for the Surround game.
 See https://docs.pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
 """
 
+import json
+import logging
 import math
 import random
 from collections import deque, namedtuple
+from pathlib import Path
 
 import ale_py
 import cv2
 import gymnasium as gym
 import numpy as np
 import torch
+from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.actions import ACTION_WORD_TO_ID
@@ -39,8 +43,44 @@ MEMORY_CAPACITY = 10_000
 NUM_EPISODES = 600
 MAX_CYCLES = 10000
 N_OBSERVATIONS = 7  # state tuple size from get_state_tuple
+LOG_DIR = Path("runs/surround_dqn")
+CHECKPOINT_DIR = LOG_DIR / "checkpoints"
+CHECKPOINT_INTERVAL = 50
+POLICY_NET_LATEST = CHECKPOINT_DIR / "policy_net_latest.pt"
+CHECKPOINT_METADATA = CHECKPOINT_DIR / "metadata.json"
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
+
+
+def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
+    """Build state tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)."""
+    if locations["ego"] is None or locations["opp"] is None:
+        return (1, 1, 1, 1, 1, 1, last_action)
+    ego_row, ego_col = locations["ego"]
+    opp_row, opp_col = locations["opp"]
+    wall_set = locations["walls"]
+    collisions = (
+        wall_set | {(opp_row, opp_col)} if opp_row is not None and opp_col is not None else wall_set
+    )
+
+    d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
+    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
+    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
+
+    rel_x = 0 if opp_col < ego_col else (2 if opp_col > ego_col else 1)
+    rel_y = 0 if opp_row < ego_row else (2 if opp_row > ego_row else 1)
+
+    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
+
+
+def get_state_from_observation(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
+    """Build state tuple from raw observation (for policy / benchmark)."""
+    if STATE_MODE == "ram":
+        raise ValueError("RAM state mode is not supported.")
+    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
+    locations = get_location(frame)
+    return get_state_tuple(locations, last_action)
 
 
 class DQN(torch.nn.Module):
@@ -78,38 +118,26 @@ class DQNTrainer:
         self.memory: deque = deque([], maxlen=MEMORY_CAPACITY)
         self.steps_done = 0
         self.episode_durations: list[int] = []
-
-    @staticmethod
-    def _get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
-        """Build state tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)."""
-        if locations["ego"] is None or locations["opp"] is None:
-            return (1, 1, 1, 1, 1, 1, last_action)
-        ego_row, ego_col = locations["ego"]
-        opp_row, opp_col = locations["opp"]
-        wall_set = locations["walls"]
-        collisions = (
-            wall_set | {(opp_row, opp_col)}
-            if opp_row is not None and opp_col is not None
-            else wall_set
+        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
+        self.writer = SummaryWriter(log_dir=str(LOG_DIR))
+        self.writer.add_custom_scalars(
+            {
+                "episode/steps_survived_by_outcome": {
+                    "steps_survived": [
+                        "Multiline",
+                        [
+                            "episode/steps_survived_win",
+                            "episode/steps_survived_loss",
+                            "episode/steps_survived_trunc",
+                        ],
+                    ]
+                }
+            }
         )
-
-        d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
-        d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
-        d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
-        d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
-
-        rel_x = 0 if opp_col < ego_col else (2 if opp_col > ego_col else 1)
-        rel_y = 0 if opp_row < ego_row else (2 if opp_row > ego_row else 1)
-
-        return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
 
     def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
         """Build state tuple from raw observation (same logic as Q-learning)."""
-        if STATE_MODE == "ram":
-            raise ValueError("RAM state mode is not supported.")
-        frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
-        locations = get_location(frame)
-        return self._get_state_tuple(locations, last_action)
+        return get_state_from_observation(observation, last_action)
 
     def _state_to_tensor(self, state_tuple: tuple[int, ...]) -> torch.Tensor:
         """Convert state tuple to (1, n_observations) float tensor."""
@@ -170,11 +198,22 @@ class DQNTrainer:
             target[key] = policy[key] * TAU + target[key] * (1 - TAU)
         self.target_net.load_state_dict(target)
 
+    def _save_checkpoint(self, episode_index: int) -> None:
+        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+        ep = episode_index + 1
+        torch.save(self.policy_net.state_dict(), POLICY_NET_LATEST)
+        metadata = {"episode_index": episode_index, "episodes_completed": ep}
+        CHECKPOINT_METADATA.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        if ep % CHECKPOINT_INTERVAL == 0:
+            path = CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
+            torch.save(self.policy_net.state_dict(), path)
+
     def run(self) -> None:
         for episode_index in trange(NUM_EPISODES):
             observation, _info = self.env.reset()
             last_action = ACTION_WORD_TO_ID["LEFT"]
             state = self._state_to_tensor(self._get_state(observation, last_action))
+            terminal_reward = 0.0
 
             for t in trange(MAX_CYCLES, leave=False):
                 action = self._select_action(state)
@@ -195,9 +234,68 @@ class DQNTrainer:
                 self._soft_update_target()
 
                 if done:
-                    self.episode_durations.append(t + 1)
+                    terminal_reward = float(reward)
+                    steps_survived = t + 1
+                    self.episode_durations.append(steps_survived)
+
+                    self.writer.add_scalar("episode/steps_survived", steps_survived, episode_index)
+                    self.writer.add_scalar(
+                        "episode/terminal_reward", terminal_reward, episode_index
+                    )
+                    self.writer.add_scalar(
+                        "episode/steps_survived_win",
+                        steps_survived if terminal_reward > 0 else float("nan"),
+                        episode_index,
+                    )
+                    self.writer.add_scalar(
+                        "episode/steps_survived_loss",
+                        steps_survived if terminal_reward < 0 else float("nan"),
+                        episode_index,
+                    )
+                    self.writer.add_scalar(
+                        "episode/steps_survived_trunc",
+                        steps_survived if terminal_reward == 0 else float("nan"),
+                        episode_index,
+                    )
+                    eps = EPS_END + (EPS_START - EPS_END) * math.exp(
+                        -1.0 * self.steps_done / EPS_DECAY
+                    )
+                    self.writer.add_scalar("episode/epsilon", eps, episode_index)
+                    self._save_checkpoint(episode_index)
                     break
+        self.writer.close()
         print("Training complete!")
+
+
+# Policy for benchmark: lazy-load policy net from latest checkpoint
+_POLICY_NET_CACHE: DQN | None = None
+_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+N_ACTIONS = 4  # Surround without NOOP
+
+
+def _load_policy_net() -> DQN:
+    global _POLICY_NET_CACHE
+    if _POLICY_NET_CACHE is None:
+        if not POLICY_NET_LATEST.exists():
+            raise FileNotFoundError(
+                f"DQN checkpoint not found: {POLICY_NET_LATEST}. Run training first."
+            )
+        _POLICY_NET_CACHE = DQN(N_OBSERVATIONS, N_ACTIONS).to(_DEVICE)
+        _POLICY_NET_CACHE.load_state_dict(
+            torch.load(POLICY_NET_LATEST, map_location=_DEVICE, weights_only=True)
+        )
+        _POLICY_NET_CACHE.eval()
+    return _POLICY_NET_CACHE
+
+
+def greedy_dqn_policy(action_space, observation, info, last_action):
+    """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
+    net = _load_policy_net()
+    state_tuple = get_state_from_observation(observation, last_action)
+    x = torch.tensor([state_tuple], dtype=torch.float32, device=_DEVICE)
+    with torch.no_grad():
+        action_index = int(net(x).max(1).indices.item())
+    return action_index + 1  # env action 1..4
 
 
 if __name__ == "__main__":
