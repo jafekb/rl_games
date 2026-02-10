@@ -22,11 +22,13 @@ GAMMA = 0.99
 CLIP_MAX = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround_q_learning")
+RUN_NAME = "default"
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY_STEPS = 1000
 EPISODES = 1_000_000
 STEP_REWARD = 0.01
+INVALID_STEP_PENALTY = -0.1
 STATE_MODE = "state_tuple"
 WINDOW_SIZE = 7
 DEBUG_STATE = False
@@ -37,6 +39,14 @@ EMPTY_CELL = 0
 WALL_CELL = 1
 EGO_CELL = 2
 FRAME_SKIP = 8
+
+# 180-degree action pairs: (UP,DOWN), (DOWN,UP), (LEFT,RIGHT), (RIGHT,LEFT)
+INVALID_ACTION_PAIRS = frozenset({(1, 4), (4, 1), (2, 3), (3, 2)})
+
+
+def is_180_turn(last_action: int, action_id: int) -> bool:
+    """True if (last_action, action_id) is a 180-degree turn (invalid step)."""
+    return (last_action, action_id) in INVALID_ACTION_PAIRS
 
 
 def total_possible_states(state_mode: str) -> int:
@@ -147,10 +157,10 @@ class QLearning:
         epsilon_decay_steps: int,
         episodes: int,
         state_mode: str,
-        log_dir: Path = LOG_DIR,
+        run_name: str,
     ):
         self.state_mode = state_mode
-        self.env = make_env(difficulty=0, mode=0)
+        self.env = make_env(difficulty=DIFFICULTY, mode=MODE)
         self.epsilon_start = epsilon_start
         self.epsilon_min = epsilon_min
         self.epsilon_decay_steps = epsilon_decay_steps
@@ -167,7 +177,10 @@ class QLearning:
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        self.writer = SummaryWriter(log_dir=str(log_dir))
+        if run_name == "default":
+            raise ValueError("Run name cannot be 'default'")
+        actual_log_dir = LOG_DIR / run_name
+        self.writer = SummaryWriter(log_dir=str(actual_log_dir))
         self.writer.add_custom_scalars(
             {
                 "episode/steps_survived_by_outcome": {
@@ -220,6 +233,8 @@ class QLearning:
             observation, reward, terminated, truncated, _info = self.env.step(action_id)
             if not (terminated or truncated):
                 reward += STEP_REWARD
+                if is_180_turn(state[-1], action_id):
+                    reward += INVALID_STEP_PENALTY
 
             next_state = self._get_state(observation, action_id)
             q_values = self._get_q(state)
@@ -377,6 +392,7 @@ if __name__ == "__main__":
         epsilon_decay_steps=EPSILON_DECAY_STEPS,
         episodes=EPISODES,
         state_mode=STATE_MODE,
+        run_name=RUN_NAME,
     )
     q_learning.train()
     print("Training complete")
