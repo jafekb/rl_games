@@ -22,7 +22,7 @@ GAMMA = 0.99
 CLIP_MAX = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround_q_learning")
-RUN_NAME = "default"  # TensorBoard run label; set e.g. "invalid_penalty_0.5" to compare runs
+RUN_NAME = "default"
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY_STEPS = 1000
@@ -157,11 +157,10 @@ class QLearning:
         epsilon_decay_steps: int,
         episodes: int,
         state_mode: str,
-        log_dir: Path = LOG_DIR,
-        run_name: str | None = None,
+        run_name: str,
     ):
         self.state_mode = state_mode
-        self.env = make_env(difficulty=0, mode=0)
+        self.env = make_env(difficulty=DIFFICULTY, mode=MODE)
         self.epsilon_start = epsilon_start
         self.epsilon_min = epsilon_min
         self.epsilon_decay_steps = epsilon_decay_steps
@@ -178,7 +177,9 @@ class QLearning:
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        actual_log_dir = log_dir / run_name if run_name else log_dir
+        if run_name == "default":
+            raise ValueError("Run name cannot be 'default'")
+        actual_log_dir = LOG_DIR / run_name
         self.writer = SummaryWriter(log_dir=str(actual_log_dir))
         self.writer.add_custom_scalars(
             {
