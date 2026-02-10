@@ -22,6 +22,7 @@ GAMMA = 0.99
 CLIP_MAX = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround_q_learning")
+RUN_NAME = "default"  # TensorBoard run label; set e.g. "invalid_penalty_0.5" to compare runs
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY_STEPS = 1000
@@ -157,6 +158,7 @@ class QLearning:
         episodes: int,
         state_mode: str,
         log_dir: Path = LOG_DIR,
+        run_name: str | None = None,
     ):
         self.state_mode = state_mode
         self.env = make_env(difficulty=0, mode=0)
@@ -176,7 +178,8 @@ class QLearning:
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        self.writer = SummaryWriter(log_dir=str(log_dir))
+        actual_log_dir = log_dir / run_name if run_name else log_dir
+        self.writer = SummaryWriter(log_dir=str(actual_log_dir))
         self.writer.add_custom_scalars(
             {
                 "episode/steps_survived_by_outcome": {
@@ -388,6 +391,7 @@ if __name__ == "__main__":
         epsilon_decay_steps=EPSILON_DECAY_STEPS,
         episodes=EPISODES,
         state_mode=STATE_MODE,
+        run_name=RUN_NAME,
     )
     q_learning.train()
     print("Training complete")
