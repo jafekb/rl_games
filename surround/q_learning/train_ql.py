@@ -27,6 +27,7 @@ EPSILON_MIN = 0.05
 EPSILON_DECAY_STEPS = 1000
 EPISODES = 1_000_000
 STEP_REWARD = 0.01
+INVALID_STEP_PENALTY = -0.1
 STATE_MODE = "state_tuple"
 WINDOW_SIZE = 7
 DEBUG_STATE = False
@@ -37,6 +38,14 @@ EMPTY_CELL = 0
 WALL_CELL = 1
 EGO_CELL = 2
 FRAME_SKIP = 8
+
+# 180-degree action pairs: (UP,DOWN), (DOWN,UP), (LEFT,RIGHT), (RIGHT,LEFT)
+INVALID_ACTION_PAIRS = frozenset({(1, 4), (4, 1), (2, 3), (3, 2)})
+
+
+def is_180_turn(last_action: int, action_id: int) -> bool:
+    """True if (last_action, action_id) is a 180-degree turn (invalid step)."""
+    return (last_action, action_id) in INVALID_ACTION_PAIRS
 
 
 def total_possible_states(state_mode: str) -> int:
@@ -220,6 +229,8 @@ class QLearning:
             observation, reward, terminated, truncated, _info = self.env.step(action_id)
             if not (terminated or truncated):
                 reward += STEP_REWARD
+                if is_180_turn(state[-1], action_id):
+                    reward += INVALID_STEP_PENALTY
 
             next_state = self._get_state(observation, action_id)
             q_values = self._get_q(state)
