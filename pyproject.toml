@@ -13,8 +13,10 @@ dependencies = [
     "gymnasium>=1.0.0",
     "imageio>=2.37.2",
     "imageio-ffmpeg>=0.6.0",
+    "opencv-python>=4.8.0",
     "pygame>=2.6.1",
     "tensorboardX",
+    "torch>=2.0.0",
     "tqdm>=4.67.3",
 ]
 

@@ -11,13 +11,21 @@ from collections import deque, namedtuple
 from itertools import count
 
 import ale_py
+import cv2
 import gymnasium as gym
+import numpy as np
 import torch
 from tqdm import trange
+
+from surround.actions import ACTION_WORD_TO_ID
+from surround.utils.video_extract_locations import get_location
 
 DIFFICULTY = 0
 MODE = 0
 FRAME_SKIP = 4
+GRID_ROWS = 18
+GRID_COLS = 38
+STATE_MODE = "state_tuple"
 
 BATCH_SIZE = 128
 GAMMA = 0.99
@@ -27,7 +35,7 @@ EPS_DECAY = 2500
 TAU = 0.005
 LR = 3e-4
 
-DEVICE = torch.device("cuda")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 NUM_EPISODES = 600
 
@@ -42,6 +50,59 @@ def make_env():
         mode=MODE,
         frameskip=FRAME_SKIP,
     )
+
+
+def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
+    """
+    Builds a state tuple from the locations of the ego, opponent, and walls.
+
+    Returns:
+        A tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action).
+        There are 2*2*2*2*3*3*4 = 576 possible states.
+    """
+    if locations["ego"] is None or locations["opp"] is None:
+        return (1, 1, 1, 1, 1, 1, last_action)
+    ego_row, ego_col = locations["ego"]
+    opp_row, opp_col = locations["opp"]
+    wall_set = locations["walls"]
+    collisions = (
+        wall_set | {(opp_row, opp_col)} if opp_row is not None and opp_col is not None else wall_set
+    )
+
+    d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
+    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
+    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
+
+    if opp_col < ego_col:
+        rel_x = 0
+    elif opp_col > ego_col:
+        rel_x = 2
+    else:
+        rel_x = 1
+
+    if opp_row < ego_row:
+        rel_y = 0
+    elif opp_row > ego_row:
+        rel_y = 2
+    else:
+        rel_y = 1
+
+    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
+
+
+def _get_state(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
+    """Build state tuple from raw observation (same logic as Q-learning)."""
+    if STATE_MODE == "ram":
+        raise ValueError("RAM state mode is not supported.")
+    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
+    locations = get_location(frame)
+    return get_state_tuple(locations, last_action)
+
+
+def state_to_tensor(state_tuple: tuple[int, ...], device: torch.device) -> torch.Tensor:
+    """Convert state tuple to (1, n_observations) float tensor."""
+    return torch.tensor([state_tuple], dtype=torch.float32, device=device)
 
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -79,8 +140,8 @@ class DQN(torch.nn.Module):
 # ignore NOOP
 env = make_env()
 n_actions = env.action_space.n - 1
-state, info = env.reset()
-n_observations = len(state)
+# State is 7-tuple from _get_state (same as Q-learning)
+n_observations = 7
 
 policy_net = DQN(n_observations, n_actions).to(DEVICE)
 target_net = DQN(n_observations, n_actions).to(DEVICE)
@@ -103,7 +164,7 @@ def select_action(state):
             # TODO(bjafek) probably have to increment by 1 to account for NOOP removal
             return policy_net(state).max(1).indices.view(1, 1)
     else:
-        return torch.tensor([[env.action_space.sample()]], device=DEVICE, dtype=torch.long)
+        return torch.tensor([[random.randrange(n_actions)]], device=DEVICE, dtype=torch.long)
 
 
 def optimize_model():
@@ -149,20 +210,22 @@ def optimize_model():
 def train():
     episode_durations = []
     for episode_index in trange(NUM_EPISODES):
-        state, info = env.reset()
-        state = torch.tensor(state, dtype=torch.float32, device=DEVICE).unsqueeze(0)
+        observation, info = env.reset()
+        last_action = ACTION_WORD_TO_ID["LEFT"]
+        state_tuple = _get_state(observation, last_action)
+        state = state_to_tensor(state_tuple, DEVICE)
         for t in count():
             action = select_action(state)
-            observation, reward, terminated, truncated, _info = env.step(action.item())
+            action_id = action.item() + 1  # env expects 1..4 (no NOOP)
+            observation, reward, terminated, truncated, _info = env.step(action_id)
             reward = torch.tensor([reward], device=DEVICE)
             done = terminated or truncated
 
             if terminated:
                 next_state = None
             else:
-                next_state = torch.tensor(
-                    observation, dtype=torch.float32, device=DEVICE
-                ).unsqueeze(0)
+                next_state_tuple = _get_state(observation, action_id)
+                next_state = state_to_tensor(next_state_tuple, DEVICE)
 
             # Store the transition in memory
             memory.push(state, action, next_state, reward)
@@ -185,7 +248,7 @@ def train():
 
             if done:
                 # TODO(bjafek) log with tensorboard
-                episode_durations.appent(t + 1)
+                episode_durations.append(t + 1)
                 break
     print("Training complete!")
 
