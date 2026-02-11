@@ -4,24 +4,24 @@ from typing import Set
 import cv2
 import numpy as np
 
+from surround import constants
+
 VIDEO_DIR = Path("video")
 EXTRACT_DIR = Path("extract")
 EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
 
 X_SIZE = 9
 Y_SIZE = 4
-GRID_ROWS = 18
-GRID_COLS = 38
 
 VISUALIZE = False
 
 
 def mask_to_grid_locations(mask: np.ndarray) -> Set[tuple[int, int]]:
     locations: Set[tuple[int, int]] = set()
-    for row in range(GRID_ROWS):
+    for row in range(constants.GRID_ROWS):
         row_start = row * X_SIZE
         row_end = row_start + X_SIZE
-        for col in range(GRID_COLS):
+        for col in range(constants.GRID_COLS):
             col_start = col * Y_SIZE
             col_end = col_start + Y_SIZE
             cell = mask[row_start:row_end, col_start:col_end]

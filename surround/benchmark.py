@@ -5,28 +5,24 @@ import sys
 from pathlib import Path
 from statistics import mean, pstdev
 
-import ale_py
-import gymnasium as gym
 import imageio.v2 as imageio
 from tqdm import trange
 
 if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from surround import constants
 from surround.dqn.train_dqn import CHECKPOINT_METADATA, greedy_dqn_policy
 from surround.q_learning.train_ql import greedy_q_policy
+from surround.utils.env_state import make_env
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 100_000
 EPISODES = 5
-SEED = 0
-DIFFICULTY = 0
-MODE = 0
 RECORD_VIDEO = True
 VIDEO_DIR = Path("video")
 VIDEO_FPS = 120
 FRAME_STRIDE = 4
-Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 
 
 POLICIES = {
@@ -36,19 +32,6 @@ POLICIES = {
     "q_learning": greedy_q_policy,
     # "snake": snake_policy,
 }
-
-
-def make_env(difficulty: int, mode: int):
-    gym.register_envs(ale_py)
-    return gym.make(
-        "ALE/Surround-v5",
-        obs_type="rgb",
-        full_action_space=False,
-        difficulty=difficulty,
-        mode=mode,
-        render_mode="rgb_array" if RECORD_VIDEO else None,
-        frameskip=FRAME_STRIDE,
-    )
 
 
 def run_episode(env, policy, seed, video_writer, episode_index: int):
@@ -83,13 +66,18 @@ def summarize(returns):
 
 
 def main() -> None:
-    env = make_env(DIFFICULTY, MODE)
+    env = make_env(
+        constants.DIFFICULTY,
+        constants.MODE,
+        frameskip=FRAME_STRIDE,
+        render_mode="rgb_array" if RECORD_VIDEO else None,
+    )
     try:
         results = {}
         q_table_episodes = None
         dqn_episodes = None
-        if Q_TABLE_PATH.exists():
-            data = json.loads(Q_TABLE_PATH.read_text(encoding="utf-8"))
+        if constants.Q_TABLE_PATH.exists():
+            data = json.loads(constants.Q_TABLE_PATH.read_text(encoding="utf-8"))
             analysis = data.get("analysis", {})
             q_table_episodes = analysis.get("episode_index")
         if CHECKPOINT_METADATA.exists():
@@ -110,7 +98,7 @@ def main() -> None:
                 total = run_episode(
                     env,
                     policy,
-                    seed=SEED + episode,
+                    seed=constants.SEED + episode,
                     video_writer=video_writer,
                     episode_index=episode,
                 )
