@@ -42,8 +42,8 @@ LR = 3e-4
 MEMORY_CAPACITY = 10_000
 NUM_EPISODES = 600
 MAX_CYCLES = 10000
-N_OBSERVATIONS = 7  # state tuple size from get_state_tuple
-LOG_DIR = Path("runs/surround_dqn")
+N_OBSERVATIONS = 11  # state tuple size from get_state_tuple (includes clear_* to wall)
+LOG_DIR = Path("runs/surround_dqn_save")
 CHECKPOINT_DIR = LOG_DIR / "checkpoints"
 CHECKPOINT_INTERVAL = 50
 POLICY_NET_LATEST = CHECKPOINT_DIR / "policy_net_latest.pt"
@@ -53,9 +53,24 @@ Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"
 
 
 def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
-    """Build state tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)."""
+    """Build state tuple: (
+        d_up,
+        d_right,
+        d_left,
+        d_down,
+        clear_up,
+        clear_right,
+        clear_left,
+        clear_down,
+        rel_x,
+        rel_y,
+        last_action).
+
+    d_*: 1 if adjacent cell blocked.
+    clear_*: 1 if path to wall in that direction is fully open.
+    """
     if locations["ego"] is None or locations["opp"] is None:
-        return (1, 1, 1, 1, 1, 1, last_action)
+        return (1, 1, 1, 1, 0, 0, 0, 0, 1, 1, last_action)
     ego_row, ego_col = locations["ego"]
     opp_row, opp_col = locations["opp"]
     wall_set = locations["walls"]
@@ -68,10 +83,32 @@ def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
     d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
     d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
 
+    # Clear path to wall: 1 if every cell in that direction until the wall is free
+    clear_up = 1 if all((r, ego_col) not in collisions for r in range(ego_row - 1, -1, -1)) else 0
+    clear_right = (
+        1 if all((ego_row, c) not in collisions for c in range(ego_col + 1, GRID_COLS)) else 0
+    )
+    clear_left = 1 if all((ego_row, c) not in collisions for c in range(ego_col - 1, -1, -1)) else 0
+    clear_down = (
+        1 if all((r, ego_col) not in collisions for r in range(ego_row + 1, GRID_ROWS)) else 0
+    )
+
     rel_x = 0 if opp_col < ego_col else (2 if opp_col > ego_col else 1)
     rel_y = 0 if opp_row < ego_row else (2 if opp_row > ego_row else 1)
 
-    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
+    return (
+        d_up,
+        d_right,
+        d_left,
+        d_down,
+        clear_up,
+        clear_right,
+        clear_left,
+        clear_down,
+        rel_x,
+        rel_y,
+        last_action,
+    )
 
 
 def get_state_from_observation(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
@@ -119,6 +156,8 @@ class DQNTrainer:
         self.steps_done = 0
         self.episode_durations: list[int] = []
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
+        if LOG_DIR.exists():
+            raise FileExistsError(f"Log directory already exists: {LOG_DIR}")
         self.writer = SummaryWriter(log_dir=str(LOG_DIR))
         self.writer.add_custom_scalars(
             {
