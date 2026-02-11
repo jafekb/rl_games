@@ -2,11 +2,9 @@ from typing import Set
 
 import cv2
 
+from surround import constants
 from surround.actions import ACTION_WORD_TO_ID, ACTION_WORDS_4
 from surround.utils.video_extract_locations import get_location
-
-GRID_ROWS = 18
-GRID_COLS = 38
 
 
 def get_action(
@@ -17,9 +15,9 @@ def get_action(
     if ego is None:
         return "UP"
     collision_up = (ego[0] - 1, ego[1]) in collisions or ego[0] <= 0
-    collision_down = (ego[0] + 1, ego[1]) in collisions or ego[0] >= GRID_ROWS - 1
+    collision_down = (ego[0] + 1, ego[1]) in collisions or ego[0] >= constants.GRID_ROWS - 1
     collision_left = (ego[0], ego[1] - 1) in collisions or ego[1] <= 0
-    collision_right = (ego[0], ego[1] + 1) in collisions or ego[1] >= GRID_COLS - 1
+    collision_right = (ego[0], ego[1] + 1) in collisions or ego[1] >= constants.GRID_COLS - 1
     # This order is really important: there is more left-right space
     # than up-down space, so we want to move towards the opponent, then
     # snake back and forth covering the entire space.
