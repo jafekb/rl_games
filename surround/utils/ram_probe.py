@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-import ale_py
-import gymnasium as gym
 import numpy as np
+
+from surround.utils.env_state import make_env
 
 ACTION_IDS = {
     "UP": 1,
@@ -51,18 +51,6 @@ class Bounds:
     x_max: int
     y_min: int
     y_max: int
-
-
-def make_env(difficulty: int, mode: int):
-    gym.register_envs(ale_py)
-    return gym.make(
-        "ALE/Surround-v5",
-        obs_type="ram",
-        full_action_space=False,
-        difficulty=difficulty,
-        mode=mode,
-        render_mode=None,
-    )
 
 
 def run_sweep(
@@ -1048,7 +1036,7 @@ def discover_and_build_extractor(
             noop_every=noop_every,
         )
     else:
-        env = make_env(difficulty, mode)
+        env = make_env(difficulty, mode, obs_type="ram", frameskip=None)
         try:
             indices, bounds = discover_position_indices(
                 env,
@@ -1177,7 +1165,7 @@ def main() -> None:
         print(f"Bounds (multi-agent): {bounds}")
         return
 
-    env = make_env(args.difficulty, args.mode)
+    env = make_env(args.difficulty, args.mode, obs_type="ram", frameskip=None)
     try:
         sweeps = [
             SweepConfig("RIGHT", ACTION_IDS["RIGHT"], args.steps),

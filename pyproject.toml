@@ -13,6 +13,7 @@ dependencies = [
     "gymnasium>=1.0.0",
     "imageio>=2.37.2",
     "imageio-ffmpeg>=0.6.0",
+    "numpy",
     "opencv-python>=4.8.0",
     "pygame>=2.6.1",
     "tensorboardX",
@@ -22,11 +23,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "pytest>=8.0",
     "ruff>=0.9.1",
 ]
 
 [tool.setuptools]
 packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 # https://docs.astral.sh/ruff/configuration/
 # https://docs.astral.sh/ruff/rules/

@@ -1,2 +1,5 @@
 """Surround package."""
-# Package marker for absolute imports.
+
+from surround.conf import constants
+
+__all__ = ["constants"]
