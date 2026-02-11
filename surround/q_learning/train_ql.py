@@ -1,14 +1,13 @@
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround import constants
 from surround.actions import ACTION_WORD_TO_ID
+from surround.utils.callbacks import TensorboardCallback, TrainingCallback
 from surround.utils.env_state import (
     build_state_from_observation,
     make_env,
@@ -25,6 +24,7 @@ class QLearning:
         episodes: int,
         state_mode: str,
         log_dir: Path = constants.LOG_DIR,
+        callbacks: list[TrainingCallback] | None = None,
     ):
         self.state_mode = state_mode
         self.env = make_env(
@@ -45,22 +45,7 @@ class QLearning:
         self.episode_lengths: list[int] = []
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
-        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        self.writer = SummaryWriter(log_dir=str(log_dir))
-        self.writer.add_custom_scalars(
-            {
-                "episode/steps_survived_by_outcome": {
-                    "steps_survived": [
-                        "Multiline",
-                        [
-                            "episode/steps_survived_win",
-                            "episode/steps_survived_loss",
-                            "episode/steps_survived_trunc",
-                        ],
-                    ]
-                }
-            }
-        )
+        self.callbacks = callbacks if callbacks is not None else [TensorboardCallback(log_dir)]
 
     def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
         return build_state_from_observation(
@@ -133,50 +118,27 @@ class QLearning:
             decay_rate = np.log(self.epsilon_start / self.epsilon_min) / max(
                 self.epsilon_decay_steps, 1
             )
-        for episode_index in trange(self.episodes):
-            epsilon = max(
-                self.epsilon_min,
-                self.epsilon_start * np.exp(-decay_rate * episode_index),
-            )
-            self.run_episode(episode_index=episode_index, epsilon=epsilon)
-            episode_steps = self.episode_lengths[-1]
-            terminal_reward = self.episode_terminal_rewards[-1]
-            self.writer.add_scalar(
-                "episode/steps_survived",
-                episode_steps,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/terminal_reward",
-                terminal_reward,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/steps_survived_win",
-                episode_steps if terminal_reward > 0 else np.nan,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/steps_survived_loss",
-                episode_steps if terminal_reward < 0 else np.nan,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/steps_survived_trunc",
-                episode_steps if terminal_reward == 0 else np.nan,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/epsilon",
-                epsilon,
-                episode_index,
-            )
-            if (episode_index + 1) % 100 == 0:
-                self.save_q_table(
-                    constants.Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon
+        for cb in self.callbacks:
+            cb.on_train_start()
+        try:
+            for episode_index in trange(self.episodes):
+                epsilon = max(
+                    self.epsilon_min,
+                    self.epsilon_start * np.exp(-decay_rate * episode_index),
                 )
-        self.save_q_table(constants.Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon)
-        self.writer.close()
+                self.run_episode(episode_index=episode_index, epsilon=epsilon)
+                episode_steps = self.episode_lengths[-1]
+                terminal_reward = self.episode_terminal_rewards[-1]
+                for cb in self.callbacks:
+                    cb.on_episode_end(episode_index, episode_steps, terminal_reward, epsilon)
+                if (episode_index + 1) % 100 == 0:
+                    self.save_q_table(
+                        constants.Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon
+                    )
+            self.save_q_table(constants.Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon)
+        finally:
+            for cb in self.callbacks:
+                cb.on_train_end()
 
     def save_q_table(self, path: Path, *, episode_index: int, epsilon: float) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
