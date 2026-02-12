@@ -1,142 +1,18 @@
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 
-import ale_py
-import cv2
-import gymnasium as gym
 import numpy as np
-from tensorboardX import SummaryWriter
 from tqdm import trange
 
+from surround import constants
 from surround.actions import ACTION_WORD_TO_ID
-from surround.utils.video_extract_locations import get_location
-
-DIFFICULTY = 0
-MODE = 0
-SEED = 0
-MAX_CYCLES = 10_000
-ALPHA = 0.1
-GAMMA = 0.99
-CLIP_MAX = 7
-Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
-LOG_DIR = Path("runs/surround_q_learning")
-EPSILON_START = 1.0
-EPSILON_MIN = 0.05
-EPSILON_DECAY_STEPS = 1000
-EPISODES = 1_000_000
-STEP_REWARD = 0.01
-STATE_MODE = "state_tuple"
-WINDOW_SIZE = 7
-DEBUG_STATE = False
-GRID_ROWS = 18
-GRID_COLS = 38
-
-EMPTY_CELL = 0
-WALL_CELL = 1
-EGO_CELL = 2
-FRAME_SKIP = 8
-
-
-def total_possible_states(state_mode: str) -> int:
-    if state_mode == "state_tuple":
-        return 576  # 2*2*2*2*3*3*4
-    raise ValueError(f"Unknown state mode: {state_mode}")
-
-
-def make_env(difficulty: int, mode: int):
-    gym.register_envs(ale_py)
-    return gym.make(
-        "ALE/Surround-v5",
-        obs_type="rgb",
-        full_action_space=False,
-        difficulty=difficulty,
-        mode=mode,
-        frameskip=FRAME_SKIP,
-    )
-
-
-def get_state_tuple(locations, last_action: int) -> tuple[int, ...]:
-    """
-    Builds a state tuple from the locations of the ego, opponent, and walls.
-
-    Args:
-        locations: The locations of the ego, opponent, and walls.
-
-    Returns:
-        A tuple of the state (d_up, d_down, d_left, d_right, rel_x, rel_y, last_action).
-        There are a total of 2*2*2*2*3*3*4 = 576 possible states:
-        - d_up: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - d_right: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - d_left: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - d_down: 1 if the ego is adjacent to a wall or out-of-bounds, 0 otherwise
-        - rel_x: 0 if the opponent is to the left of the ego, 1 if the opponent is in the
-            same column as the ego, 2 if the opponent is to the right of the ego.
-        - rel_y: 0 if the opponent is above the ego, 1 if the opponent is in the same row as
-            the ego, 2 if the opponent is below the ego
-        - last_action: 1..4 for UP/RIGHT/LEFT/DOWN
-    """
-    if locations["ego"] is None or locations["opp"] is None:
-        # Sometimes this happens if the game ends.
-        return (1, 1, 1, 1, 1, 1, last_action)
-    ego_row, ego_col = locations["ego"]
-    opp_row, opp_col = locations["opp"]
-    wall_set = locations["walls"]
-    collisions = (
-        wall_set | {(opp_row, opp_col)} if opp_row is not None and opp_col is not None else wall_set
-    )
-
-    # 1. Survival Features (4 Binary Flags)
-    # Check adjacent tiles for walls or trails
-    d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
-    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
-    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
-    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
-
-    # 2. Relational Features (Map -1, 0, 1 to 0, 1, 2)
-    # We shift the values so they are non-negative for the index math
-    if opp_col < ego_col:
-        rel_x = 0  # Opponent is Left
-    elif opp_col > ego_col:
-        rel_x = 2  # Opponent is Right
-    else:
-        rel_x = 1  # Same Column
-
-    if opp_row < ego_row:
-        rel_y = 0  # Opponent is Above
-    elif opp_row > ego_row:
-        rel_y = 2  # Opponent is Below
-    else:
-        rel_y = 1  # Same Row
-
-    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
-
-
-def build_state_from_observation(
-    observation: np.ndarray,
-    last_action: int,
-    *,
-    state_mode: str,
-) -> tuple[int, ...]:
-    """
-    Builds a state from an observation.
-
-    Args:
-        observation: The observation to build a state from.
-        state_mode: The state mode to use.
-
-    Returns:
-        A tuple of the state: ()
-    """
-    if state_mode == "ram":
-        raise ValueError("RAM state mode is not supported.")
-    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
-    locations = get_location(frame)
-    state = get_state_tuple(locations, last_action)
-    if DEBUG_STATE:
-        print("state_tuple", state)
-    return state
+from surround.utils.callbacks import TensorboardCallback, TrainingCallback
+from surround.utils.env_state import (
+    build_state_from_observation,
+    make_env,
+    total_possible_states,
+)
 
 
 class QLearning:
@@ -147,10 +23,13 @@ class QLearning:
         epsilon_decay_steps: int,
         episodes: int,
         state_mode: str,
-        log_dir: Path = LOG_DIR,
+        log_dir: Path = constants.LOG_DIR,
+        callbacks: list[TrainingCallback] | None = None,
     ):
         self.state_mode = state_mode
-        self.env = make_env(difficulty=0, mode=0)
+        self.env = make_env(
+            difficulty=constants.DIFFICULTY, mode=constants.MODE, frameskip=constants.FRAME_SKIP
+        )
         self.epsilon_start = epsilon_start
         self.epsilon_min = epsilon_min
         self.epsilon_decay_steps = epsilon_decay_steps
@@ -166,28 +45,14 @@ class QLearning:
         self.episode_lengths: list[int] = []
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
-        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        self.writer = SummaryWriter(log_dir=str(log_dir))
-        self.writer.add_custom_scalars(
-            {
-                "episode/steps_survived_by_outcome": {
-                    "steps_survived": [
-                        "Multiline",
-                        [
-                            "episode/steps_survived_win",
-                            "episode/steps_survived_loss",
-                            "episode/steps_survived_trunc",
-                        ],
-                    ]
-                }
-            }
-        )
+        self.callbacks = callbacks if callbacks is not None else [TensorboardCallback(log_dir)]
 
     def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
         return build_state_from_observation(
             observation,
             last_action,
             state_mode=self.state_mode,
+            debug_state=constants.DEBUG_STATE,
         )
 
     def _get_q(self, state: tuple[int, ...]) -> np.ndarray:
@@ -206,7 +71,7 @@ class QLearning:
         return action_index + 1, action_index, False
 
     def run_episode(self, episode_index: int, epsilon: float):
-        observation, _info = self.env.reset(seed=SEED + episode_index)
+        observation, _info = self.env.reset(seed=constants.SEED + episode_index)
         last_action = ACTION_WORD_TO_ID["LEFT"]
         state = self._get_state(observation, last_action)
         self.unique_states.add(state)
@@ -216,19 +81,19 @@ class QLearning:
         terminated = False
         truncated = False
         for cycle_step in trange(
-            MAX_CYCLES,
+            constants.MAX_CYCLES,
             leave=False,
         ):
             action_id, action_index, is_random = self._get_action(state, epsilon)
             observation, reward, terminated, truncated, _info = self.env.step(action_id)
             if not (terminated or truncated):
-                reward += STEP_REWARD
+                reward += constants.STEP_REWARD
 
             next_state = self._get_state(observation, action_id)
             q_values = self._get_q(state)
             next_best = float(np.max(self._get_q(next_state)))
-            q_values[action_index] = q_values[action_index] + ALPHA * (
-                reward + GAMMA * next_best - q_values[action_index]
+            q_values[action_index] = q_values[action_index] + constants.ALPHA * (
+                reward + constants.GAMMA * next_best - q_values[action_index]
             )
             self.q_table[state]["visit_count"] += 1
             state = next_state
@@ -257,48 +122,27 @@ class QLearning:
             decay_rate = np.log(self.epsilon_start / self.epsilon_min) / max(
                 self.epsilon_decay_steps, 1
             )
-        for episode_index in trange(self.episodes):
-            epsilon = max(
-                self.epsilon_min,
-                self.epsilon_start * np.exp(-decay_rate * episode_index),
-            )
-            self.run_episode(episode_index=episode_index, epsilon=epsilon)
-            episode_steps = self.episode_lengths[-1]
-            terminal_reward = self.episode_terminal_rewards[-1]
-            self.writer.add_scalar(
-                "episode/steps_survived",
-                episode_steps,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/terminal_reward",
-                terminal_reward,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/steps_survived_win",
-                episode_steps if terminal_reward > 0 else np.nan,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/steps_survived_loss",
-                episode_steps if terminal_reward < 0 else np.nan,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/steps_survived_trunc",
-                episode_steps if terminal_reward == 0 else np.nan,
-                episode_index,
-            )
-            self.writer.add_scalar(
-                "episode/epsilon",
-                epsilon,
-                episode_index,
-            )
-            if (episode_index + 1) % 100 == 0:
-                self.save_q_table(Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon)
-        self.save_q_table(Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon)
-        self.writer.close()
+        for cb in self.callbacks:
+            cb.on_train_start()
+        try:
+            for episode_index in trange(self.episodes):
+                epsilon = max(
+                    self.epsilon_min,
+                    self.epsilon_start * np.exp(-decay_rate * episode_index),
+                )
+                self.run_episode(episode_index=episode_index, epsilon=epsilon)
+                episode_steps = self.episode_lengths[-1]
+                terminal_reward = self.episode_terminal_rewards[-1]
+                for cb in self.callbacks:
+                    cb.on_episode_end(episode_index, episode_steps, terminal_reward, epsilon)
+                if (episode_index + 1) % 100 == 0:
+                    self.save_q_table(
+                        constants.Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon
+                    )
+            self.save_q_table(constants.Q_TABLE_PATH, episode_index=episode_index, epsilon=epsilon)
+        finally:
+            for cb in self.callbacks:
+                cb.on_train_end()
 
     def save_q_table(self, path: Path, *, episode_index: int, epsilon: float) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -308,12 +152,12 @@ class QLearning:
         mean_episode_length = float(np.mean(self.episode_lengths)) if self.episode_lengths else 0.0
         mean_episode_return = float(np.mean(self.episode_returns)) if self.episode_returns else 0.0
         data = {
-            "clip_max": CLIP_MAX,
+            "clip_max": constants.CLIP_MAX,
             "analysis": {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "episode_index": episode_index,
                 "max_episodes": self.episodes,
-                "max_cycles": MAX_CYCLES,
+                "max_cycles": constants.MAX_CYCLES,
                 "epsilon": epsilon,
                 "state_mode": self.state_mode,
                 "epsilon_start": self.epsilon_start,
@@ -362,12 +206,13 @@ def greedy_q_policy(action_space, observation, info, last_action):
     global _Q_TABLE_CACHE, _STATS
 
     if _Q_TABLE_CACHE is None:
-        _Q_TABLE_CACHE = load_q_table(Q_TABLE_PATH)
+        _Q_TABLE_CACHE = load_q_table(constants.Q_TABLE_PATH)
 
     state = build_state_from_observation(
         observation,
         last_action,
-        state_mode=STATE_MODE,
+        state_mode=constants.STATE_MODE,
+        debug_state=constants.DEBUG_STATE,
     )
     entry = _Q_TABLE_CACHE.get(state)
     if entry is None:
@@ -383,11 +228,11 @@ def greedy_q_policy(action_space, observation, info, last_action):
 
 if __name__ == "__main__":
     q_learning = QLearning(
-        epsilon_start=EPSILON_START,
-        epsilon_min=EPSILON_MIN,
-        epsilon_decay_steps=EPSILON_DECAY_STEPS,
-        episodes=EPISODES,
-        state_mode=STATE_MODE,
+        epsilon_start=constants.EPSILON_START,
+        epsilon_min=constants.EPSILON_MIN,
+        epsilon_decay_steps=constants.EPSILON_DECAY_STEPS,
+        episodes=constants.EPISODES,
+        state_mode=constants.STATE_MODE,
     )
     q_learning.train()
     print("Training complete")
