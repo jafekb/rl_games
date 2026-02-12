@@ -154,7 +154,6 @@ class QLearning:
         mean_episode_length = float(np.mean(self.episode_lengths)) if self.episode_lengths else 0.0
         mean_episode_return = float(np.mean(self.episode_returns)) if self.episode_returns else 0.0
         data = {
-            "clip_max": constants.CLIP_MAX,
             "analysis": {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "episode_index": episode_index,
