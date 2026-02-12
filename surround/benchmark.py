@@ -12,6 +12,7 @@ if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from surround import constants
+from surround.dqn.train_dqn import greedy_dqn_policy
 from surround.q_learning.train_ql import greedy_q_policy
 from surround.utils.env_state import make_env
 
@@ -27,6 +28,7 @@ FRAME_STRIDE = 4
 POLICIES = {
     # "random": random_policy,
     # "human": get_human_action,
+    "dqn": greedy_dqn_policy,
     "q_learning": greedy_q_policy,
     # "snake": snake_policy,
 }
@@ -73,10 +75,14 @@ def main() -> None:
     try:
         results = {}
         q_table_episodes = None
+        dqn_episodes = None
         if constants.Q_TABLE_PATH.exists():
             data = json.loads(constants.Q_TABLE_PATH.read_text(encoding="utf-8"))
             analysis = data.get("analysis", {})
             q_table_episodes = analysis.get("episode_index")
+        if constants.DQN_CHECKPOINT_METADATA.exists():
+            dqn_meta = json.loads(constants.DQN_CHECKPOINT_METADATA.read_text(encoding="utf-8"))
+            dqn_episodes = dqn_meta.get("episode_index")
         for policy_name, policy in POLICIES.items():
             video_writer = None
             if RECORD_VIDEO:
@@ -107,6 +113,8 @@ def main() -> None:
     for policy_name, stats in results.items():
         if policy_name == "q_learning" and q_table_episodes is not None:
             name_label = f"{policy_name} ({q_table_episodes} episodes)"
+        elif policy_name == "dqn" and dqn_episodes is not None:
+            name_label = f"{policy_name} ({dqn_episodes} episodes)"
         else:
             name_label = policy_name
         print(f"{name_label}: mean_return={stats['mean']:.2f} std={stats['std']:.2f}")

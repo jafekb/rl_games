@@ -17,6 +17,7 @@ dependencies = [
     "opencv-python>=4.8.0",
     "pygame>=2.6.1",
     "tensorboardX",
+    "torch>=2.0.0",
     "tqdm>=4.67.3",
 ]
 
