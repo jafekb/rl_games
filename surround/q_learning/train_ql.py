@@ -45,6 +45,8 @@ class QLearning:
         self.episode_lengths: list[int] = []
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
+        if log_dir.exists():
+            raise FileExistsError(f"Log directory {log_dir} already exists")
         self.callbacks = callbacks if callbacks is not None else [TensorboardCallback(log_dir)]
 
     def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:

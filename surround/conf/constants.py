@@ -31,4 +31,4 @@ WINDOW_SIZE = 7
 
 # Paths
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
-LOG_DIR = Path("runs/surround_q_learning")
+LOG_DIR = Path("runs/surround_ql_visits")
