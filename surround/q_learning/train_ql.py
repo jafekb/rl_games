@@ -37,7 +37,7 @@ class QLearning:
         # We removed NOOP from the action space
         self.n_actions = self.env.action_space.n - 1
 
-        self.q_table: dict[tuple[int, ...], np.ndarray] = {}
+        self.q_table: dict[tuple[int, ...], dict] = {}
         self.unique_states: set[tuple[int, ...]] = set()
         self.total_steps = 0
         self.random_steps = 0
@@ -45,6 +45,8 @@ class QLearning:
         self.episode_lengths: list[int] = []
         self.episode_returns: list[float] = []
         self.episode_terminal_rewards: list[float] = []
+        if log_dir.exists():
+            raise FileExistsError(f"Log directory {log_dir} already exists")
         self.callbacks = callbacks if callbacks is not None else [TensorboardCallback(log_dir)]
 
     def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
@@ -57,8 +59,11 @@ class QLearning:
 
     def _get_q(self, state: tuple[int, ...]) -> np.ndarray:
         if state not in self.q_table:
-            self.q_table[state] = np.ones(self.n_actions, dtype=np.float32)
-        return self.q_table[state]
+            self.q_table[state] = {
+                "q": np.ones(self.n_actions, dtype=np.float32),
+                "visit_count": 0,
+            }
+        return self.q_table[state]["q"]
 
     def _get_action(self, state: tuple[int, ...], epsilon: float) -> tuple[int, int, bool]:
         if np.random.random() < epsilon:
@@ -92,6 +97,7 @@ class QLearning:
             q_values[action_index] = q_values[action_index] + constants.ALPHA * (
                 reward + constants.GAMMA * next_best - q_values[action_index]
             )
+            self.q_table[state]["visit_count"] += 1
             state = next_state
             self.unique_states.add(state)
             self.total_steps += 1
@@ -148,7 +154,6 @@ class QLearning:
         mean_episode_length = float(np.mean(self.episode_lengths)) if self.episode_lengths else 0.0
         mean_episode_return = float(np.mean(self.episode_returns)) if self.episode_returns else 0.0
         data = {
-            "clip_max": constants.CLIP_MAX,
             "analysis": {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "episode_index": episode_index,
@@ -172,22 +177,29 @@ class QLearning:
                 "mean_episode_return": mean_episode_return,
             },
             "states": {
-                ",".join(map(str, state)): values.tolist() for state, values in self.q_table.items()
+                ",".join(map(str, state)): {
+                    "q": entry["q"].tolist(),
+                    "visit_count": entry["visit_count"],
+                }
+                for state, entry in self.q_table.items()
             },
         }
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-_Q_TABLE_CACHE: dict[tuple[int, ...], np.ndarray] | None = None
+_Q_TABLE_CACHE: dict[tuple[int, ...], dict] | None = None
 _STATS = {"valid": []}
 
 
-def load_q_table(path: Path) -> dict[tuple[int, ...], np.ndarray]:
+def load_q_table(path: Path) -> dict[tuple[int, ...], dict]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    states: dict[tuple[int, ...], np.ndarray] = {}
-    for key, values in data.get("states", {}).items():
+    states: dict[tuple[int, ...], dict] = {}
+    for key, obj in data.get("states", {}).items():
         state = tuple(int(part) for part in key.split(","))
-        states[state] = np.asarray(values, dtype=np.float32)
+        states[state] = {
+            "q": np.asarray(obj["q"], dtype=np.float32),
+            "visit_count": int(obj["visit_count"]),
+        }
     return states
 
 
@@ -203,8 +215,8 @@ def greedy_q_policy(action_space, observation, info, last_action):
         state_mode=constants.STATE_MODE,
         debug_state=constants.DEBUG_STATE,
     )
-    q_values = _Q_TABLE_CACHE.get(state)
-    if q_values is None:
+    entry = _Q_TABLE_CACHE.get(state)
+    if entry is None:
         _STATS["valid"].append(0)
         with Path("stats.json").open("w") as f:
             json.dump(_STATS, f)
@@ -212,7 +224,7 @@ def greedy_q_policy(action_space, observation, info, last_action):
     _STATS["valid"].append(1)
     with Path("stats.json").open("w") as f:
         json.dump(_STATS, f)
-    return int(np.argmax(q_values)) + 1
+    return int(np.argmax(entry["q"])) + 1
 
 
 if __name__ == "__main__":

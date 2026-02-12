@@ -20,7 +20,6 @@ MAX_CYCLES = 10_000
 # Q-learning
 ALPHA = 0.1
 GAMMA = 0.99
-CLIP_MAX = 7
 EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 EPSILON_DECAY_STEPS = 1000
@@ -31,4 +30,4 @@ WINDOW_SIZE = 7
 
 # Paths
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
-LOG_DIR = Path("runs/surround_q_learning")
+LOG_DIR = Path("runs/surround_ql_visits")
