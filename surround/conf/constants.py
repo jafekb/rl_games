@@ -29,6 +29,25 @@ STEP_REWARD = 0.01
 STATE_MODE = "state_tuple"
 WINDOW_SIZE = 7
 
-# Paths
+# Paths (Q-learning)
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround_q_learning")
+
+# DQN
+DQN_FRAME_SKIP = 4
+BATCH_SIZE = 128
+GAMMA_DQN = 0.99
+EPS_START = 0.9
+EPS_END = 0.01
+EPS_DECAY = 2500
+TAU = 0.005
+LR = 3e-4
+MEMORY_CAPACITY = 10_000
+NUM_EPISODES = 600
+N_OBSERVATIONS = 7  # state tuple size from get_state_tuple
+N_ACTIONS = 4  # Surround without NOOP
+DQN_LOG_DIR = Path("runs/surround_dqn_save")
+DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"
+DQN_CHECKPOINT_INTERVAL = 50
+DQN_POLICY_NET_LATEST = DQN_CHECKPOINT_DIR / "policy_net_latest.pt"
+DQN_CHECKPOINT_METADATA = DQN_CHECKPOINT_DIR / "metadata.json"

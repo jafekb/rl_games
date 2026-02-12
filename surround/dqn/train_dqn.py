@@ -10,7 +10,6 @@ import logging
 import math
 import random
 from collections import deque, namedtuple
-from pathlib import Path
 
 import ale_py
 import cv2
@@ -21,33 +20,8 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.actions import ACTION_WORD_TO_ID
+from surround.conf import constants
 from surround.utils.video_extract_locations import get_location
-
-# Environment / game constants
-DIFFICULTY = 0
-MODE = 0
-FRAME_SKIP = 4
-GRID_ROWS = 18
-GRID_COLS = 38
-STATE_MODE = "state_tuple"
-
-# DQN hyperparameters
-BATCH_SIZE = 128
-GAMMA = 0.99
-EPS_START = 0.9
-EPS_END = 0.01
-EPS_DECAY = 2500
-TAU = 0.005
-LR = 3e-4
-MEMORY_CAPACITY = 10_000
-NUM_EPISODES = 600
-MAX_CYCLES = 10000
-N_OBSERVATIONS = 7  # state tuple size from get_state_tuple
-LOG_DIR = Path("runs/surround_dqn")
-CHECKPOINT_DIR = LOG_DIR / "checkpoints"
-CHECKPOINT_INTERVAL = 50
-POLICY_NET_LATEST = CHECKPOINT_DIR / "policy_net_latest.pt"
-CHECKPOINT_METADATA = CHECKPOINT_DIR / "metadata.json"
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
@@ -64,9 +38,9 @@ def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
     )
 
     d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
-    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= GRID_COLS - 1 else 0
+    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= constants.GRID_COLS - 1 else 0
     d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
-    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= GRID_ROWS - 1 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= constants.GRID_ROWS - 1 else 0
 
     rel_x = 0 if opp_col < ego_col else (2 if opp_col > ego_col else 1)
     rel_y = 0 if opp_row < ego_row else (2 if opp_row > ego_row else 1)
@@ -76,7 +50,7 @@ def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
 
 def get_state_from_observation(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
     """Build state tuple from raw observation (for policy / benchmark)."""
-    if STATE_MODE == "ram":
+    if constants.STATE_MODE == "ram":
         raise ValueError("RAM state mode is not supported.")
     frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
     locations = get_location(frame)
@@ -106,20 +80,22 @@ class DQNTrainer:
             "ALE/Surround-v5",
             obs_type="rgb",
             full_action_space=False,
-            difficulty=DIFFICULTY,
-            mode=MODE,
-            frameskip=FRAME_SKIP,
+            difficulty=constants.DIFFICULTY,
+            mode=constants.MODE,
+            frameskip=constants.DQN_FRAME_SKIP,
         )
         self.n_actions = self.env.action_space.n - 1  # ignore NOOP
-        self.policy_net = DQN(N_OBSERVATIONS, self.n_actions).to(self.device)
-        self.target_net = DQN(N_OBSERVATIONS, self.n_actions).to(self.device)
+        self.policy_net = DQN(constants.N_OBSERVATIONS, self.n_actions).to(self.device)
+        self.target_net = DQN(constants.N_OBSERVATIONS, self.n_actions).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.optimizer = torch.optim.AdamW(self.policy_net.parameters(), lr=LR, amsgrad=True)
-        self.memory: deque = deque([], maxlen=MEMORY_CAPACITY)
+        self.optimizer = torch.optim.AdamW(
+            self.policy_net.parameters(), lr=constants.LR, amsgrad=True
+        )
+        self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
         self.steps_done = 0
         self.episode_durations: list[int] = []
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        self.writer = SummaryWriter(log_dir=str(LOG_DIR))
+        self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
         self.writer.add_custom_scalars(
             {
                 "episode/steps_survived_by_outcome": {
@@ -145,8 +121,8 @@ class DQNTrainer:
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
-        eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(
-            -1.0 * self.steps_done / EPS_DECAY
+        eps_threshold = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
+            -1.0 * self.steps_done / constants.EPS_DECAY
         )
         self.steps_done += 1
 
@@ -160,10 +136,10 @@ class DQNTrainer:
         )
 
     def _optimize_model(self) -> None:
-        if len(self.memory) < BATCH_SIZE:
+        if len(self.memory) < constants.BATCH_SIZE:
             return
 
-        transitions = random.sample(self.memory, BATCH_SIZE)
+        transitions = random.sample(self.memory, constants.BATCH_SIZE)
         batch = Transition(*zip(*transitions))
 
         non_final_mask = torch.tensor(
@@ -178,10 +154,10 @@ class DQNTrainer:
 
         state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
-        next_state_values = torch.zeros(BATCH_SIZE, device=self.device)
+        next_state_values = torch.zeros(constants.BATCH_SIZE, device=self.device)
         with torch.no_grad():
             next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(1).values
-        expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+        expected_state_action_values = (next_state_values * constants.GAMMA_DQN) + reward_batch
 
         criterion = torch.nn.SmoothL1Loss()
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
@@ -195,27 +171,29 @@ class DQNTrainer:
         target = self.target_net.state_dict()
         policy = self.policy_net.state_dict()
         for key in policy:
-            target[key] = policy[key] * TAU + target[key] * (1 - TAU)
+            target[key] = policy[key] * constants.TAU + target[key] * (1 - constants.TAU)
         self.target_net.load_state_dict(target)
 
     def _save_checkpoint(self, episode_index: int) -> None:
-        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+        constants.DQN_CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
         ep = episode_index + 1
-        torch.save(self.policy_net.state_dict(), POLICY_NET_LATEST)
+        torch.save(self.policy_net.state_dict(), constants.DQN_POLICY_NET_LATEST)
         metadata = {"episode_index": episode_index, "episodes_completed": ep}
-        CHECKPOINT_METADATA.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-        if ep % CHECKPOINT_INTERVAL == 0:
-            path = CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
+        constants.DQN_CHECKPOINT_METADATA.write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
+        )
+        if ep % constants.DQN_CHECKPOINT_INTERVAL == 0:
+            path = constants.DQN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
             torch.save(self.policy_net.state_dict(), path)
 
     def run(self) -> None:
-        for episode_index in trange(NUM_EPISODES):
+        for episode_index in trange(constants.NUM_EPISODES):
             observation, _info = self.env.reset()
             last_action = ACTION_WORD_TO_ID["LEFT"]
             state = self._state_to_tensor(self._get_state(observation, last_action))
             terminal_reward = 0.0
 
-            for t in trange(MAX_CYCLES, leave=False):
+            for t in trange(constants.MAX_CYCLES, leave=False):
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = self.env.step(action_id)
@@ -257,8 +235,8 @@ class DQNTrainer:
                         steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
-                    eps = EPS_END + (EPS_START - EPS_END) * math.exp(
-                        -1.0 * self.steps_done / EPS_DECAY
+                    eps = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
+                        -1.0 * self.steps_done / constants.EPS_DECAY
                     )
                     self.writer.add_scalar("episode/epsilon", eps, episode_index)
                     self._save_checkpoint(episode_index)
@@ -270,19 +248,22 @@ class DQNTrainer:
 # Policy for benchmark: lazy-load policy net from latest checkpoint
 _POLICY_NET_CACHE: DQN | None = None
 _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-N_ACTIONS = 4  # Surround without NOOP
 
 
 def _load_policy_net() -> DQN:
     global _POLICY_NET_CACHE
     if _POLICY_NET_CACHE is None:
-        if not POLICY_NET_LATEST.exists():
+        if not constants.DQN_POLICY_NET_LATEST.exists():
             raise FileNotFoundError(
-                f"DQN checkpoint not found: {POLICY_NET_LATEST}. Run training first."
+                f"DQN checkpoint not found: {constants.DQN_POLICY_NET_LATEST}. Run training first."
             )
-        _POLICY_NET_CACHE = DQN(N_OBSERVATIONS, N_ACTIONS).to(_DEVICE)
+        _POLICY_NET_CACHE = DQN(constants.N_OBSERVATIONS, constants.N_ACTIONS).to(_DEVICE)
         _POLICY_NET_CACHE.load_state_dict(
-            torch.load(POLICY_NET_LATEST, map_location=_DEVICE, weights_only=True)
+            torch.load(
+                constants.DQN_POLICY_NET_LATEST,
+                map_location=_DEVICE,
+                weights_only=True,
+            )
         )
         _POLICY_NET_CACHE.eval()
     return _POLICY_NET_CACHE

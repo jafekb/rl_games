@@ -12,7 +12,7 @@ if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from surround import constants
-from surround.dqn.train_dqn import CHECKPOINT_METADATA, greedy_dqn_policy
+from surround.dqn.train_dqn import greedy_dqn_policy
 from surround.q_learning.train_ql import greedy_q_policy
 from surround.utils.env_state import make_env
 
@@ -80,8 +80,8 @@ def main() -> None:
             data = json.loads(constants.Q_TABLE_PATH.read_text(encoding="utf-8"))
             analysis = data.get("analysis", {})
             q_table_episodes = analysis.get("episode_index")
-        if CHECKPOINT_METADATA.exists():
-            dqn_meta = json.loads(CHECKPOINT_METADATA.read_text(encoding="utf-8"))
+        if constants.DQN_CHECKPOINT_METADATA.exists():
+            dqn_meta = json.loads(constants.DQN_CHECKPOINT_METADATA.read_text(encoding="utf-8"))
             dqn_episodes = dqn_meta.get("episode_index")
         for policy_name, policy in POLICIES.items():
             video_writer = None
