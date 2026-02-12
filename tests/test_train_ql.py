@@ -14,8 +14,8 @@ def test_load_q_table_roundtrip(tmp_path):
     """load_q_table reads JSON written in save_q_table format."""
     data = {
         "states": {
-            "1,1,1,1,1,1,1": [0.1, 0.2, 0.3, 0.4],
-            "0,0,0,0,1,1,2": [0.5, 0.5, 0.5, 0.5],
+            "1,1,1,1,1,1,1": {"q": [0.1, 0.2, 0.3, 0.4], "visit_count": 1},
+            "0,0,0,0,1,1,2": {"q": [0.5, 0.5, 0.5, 0.5], "visit_count": 2},
         },
         "analysis": {},
     }
@@ -26,8 +26,10 @@ def test_load_q_table_roundtrip(tmp_path):
     assert len(table) == 2
     assert (1, 1, 1, 1, 1, 1, 1) in table
     assert (0, 0, 0, 0, 1, 1, 2) in table
-    np.testing.assert_array_almost_equal(table[(1, 1, 1, 1, 1, 1, 1)], [0.1, 0.2, 0.3, 0.4])
-    np.testing.assert_array_almost_equal(table[(0, 0, 0, 0, 1, 1, 2)], [0.5, 0.5, 0.5, 0.5])
+    np.testing.assert_array_almost_equal(table[(1, 1, 1, 1, 1, 1, 1)]["q"], [0.1, 0.2, 0.3, 0.4])
+    np.testing.assert_array_almost_equal(table[(0, 0, 0, 0, 1, 1, 2)]["q"], [0.5, 0.5, 0.5, 0.5])
+    assert table[(1, 1, 1, 1, 1, 1, 1)]["visit_count"] == 1
+    assert table[(0, 0, 0, 0, 1, 1, 2)]["visit_count"] == 2
 
 
 def test_load_q_table_empty_states(tmp_path):
@@ -45,12 +47,14 @@ def test_qlearning_train_with_empty_callbacks(ale_available, tmp_path, monkeypat
     monkeypatch.setattr(constants, "Q_TABLE_PATH", tmp_path / "q_table.json")
     from surround.q_learning.train_ql import QLearning
 
+    log_dir = tmp_path / "log"
     ql = QLearning(
         epsilon_start=0.1,
         epsilon_min=0.05,
         epsilon_decay_steps=10,
         episodes=1,
         state_mode=constants.STATE_MODE,
+        log_dir=log_dir,
         callbacks=[],
     )
     ql.train()
