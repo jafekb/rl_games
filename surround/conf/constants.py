@@ -38,14 +38,15 @@ BATCH_SIZE = 128
 GAMMA_DQN = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-EPS_DECAY = 2500
+# Decay over ~50k steps so exploration lasts while learning (was 2500, bottomed out too early)
+EPS_DECAY = 50_000
 TAU = 0.005
 LR = 3e-4
 MEMORY_CAPACITY = 10_000
 NUM_EPISODES = 600
 N_OBSERVATIONS = 7  # state tuple size from get_state_tuple
 N_ACTIONS = 4  # Surround without NOOP
-DQN_LOG_DIR = Path("runs/surround_dqn_save")
+DQN_LOG_DIR = Path("runs/surround_dqn_exp3")
 DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"
 DQN_CHECKPOINT_INTERVAL = 50
 DQN_POLICY_NET_LATEST = DQN_CHECKPOINT_DIR / "policy_net_latest.pt"
