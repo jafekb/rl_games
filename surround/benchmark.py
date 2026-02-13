@@ -13,12 +13,11 @@ if __package__ is None:
 
 from surround import constants
 from surround.dqn.train_dqn import greedy_dqn_policy
-from surround.q_learning.train_ql import greedy_q_policy
 from surround.utils.env_state import make_env
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 100_000
-EPISODES = 5
+EPISODES = 10
 RECORD_VIDEO = True
 VIDEO_DIR = Path("video")
 VIDEO_FPS = 120
@@ -29,7 +28,7 @@ POLICIES = {
     # "random": random_policy,
     # "human": get_human_action,
     "dqn": greedy_dqn_policy,
-    "q_learning": greedy_q_policy,
+    # "q_learning": greedy_q_policy,
     # "snake": snake_policy,
 }
 
