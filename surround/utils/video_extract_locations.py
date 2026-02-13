@@ -13,6 +13,10 @@ EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
 X_SIZE = 9
 Y_SIZE = 4
 
+# Crop bounds for the game region
+GAME_ROW_SLICE = slice(35, 197)
+GAME_COL_SLICE = slice(4, 156)
+
 VISUALIZE = False
 
 
@@ -45,7 +49,7 @@ def get_location(image: np.ndarray) -> dict:
         "opp": None,
         "walls": set(),
     }
-    game = image[35:197, 4:156, :]
+    game = image[GAME_ROW_SLICE, GAME_COL_SLICE, :]
     ego = cv2.inRange(game, (90, 192, 180), (100, 197, 185))
     opponent = cv2.inRange(game, (70, 70, 195), (75, 75, 205))
     walls = cv2.inRange(game, (190, 100, 210), (200, 110, 220))
@@ -65,6 +69,31 @@ def get_location(image: np.ndarray) -> dict:
         cv2.imwrite(EXTRACT_DIR / "5_walls.png", walls)
 
     return locations
+
+
+def observation_to_class_map(observation: np.ndarray) -> np.ndarray:
+    """
+    Convert an RGB observation to a single (H, W) array with 4 pixel classes.
+
+    Uses the same game crop and BGR inRange logic as get_location. Each pixel is
+    assigned one of: 0=empty, 1=wall, 2=opponent, 3=ego (priority: ego > opponent > wall > empty).
+
+    Args:
+        observation: RGB image from the env, shape (height, width, 3).
+
+    Returns:
+        (H, W) array, dtype uint8, values in {0, 1, 2, 3}.
+    """
+    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
+    game = frame[GAME_ROW_SLICE, GAME_COL_SLICE, :]
+    walls = cv2.inRange(game, (190, 100, 210), (200, 110, 220))
+    opponent = cv2.inRange(game, (70, 70, 195), (75, 75, 205))
+    ego = cv2.inRange(game, (90, 192, 180), (100, 197, 185))
+    out = np.zeros(game.shape[:2], dtype=np.uint8)
+    out[walls.astype(bool)] = 1
+    out[opponent.astype(bool)] = 2
+    out[ego.astype(bool)] = 3
+    return out
 
 
 def main(images: list[Path]) -> None:

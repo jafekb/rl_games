@@ -12,62 +12,45 @@ import random
 from collections import deque, namedtuple
 
 import ale_py
-import cv2
 import gymnasium as gym
 import numpy as np
 import torch
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from surround.actions import ACTION_WORD_TO_ID
 from surround.conf import constants
-from surround.utils.video_extract_locations import get_location
+from surround.utils.video_extract_locations import observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
 
-def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
-    """Build state tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)."""
-    if locations["ego"] is None or locations["opp"] is None:
-        return (1, 1, 1, 1, 1, 1, last_action)
-    ego_row, ego_col = locations["ego"]
-    opp_row, opp_col = locations["opp"]
-    wall_set = locations["walls"]
-    collisions = (
-        wall_set | {(opp_row, opp_col)} if opp_row is not None and opp_col is not None else wall_set
-    )
-
-    d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
-    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= constants.GRID_COLS - 1 else 0
-    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
-    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= constants.GRID_ROWS - 1 else 0
-
-    rel_x = 0 if opp_col < ego_col else (2 if opp_col > ego_col else 1)
-    rel_y = 0 if opp_row < ego_row else (2 if opp_row > ego_row else 1)
-
-    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
-
-
-def get_state_from_observation(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
-    """Build state tuple from raw observation (for policy / benchmark)."""
-    if constants.STATE_MODE == "ram":
-        raise ValueError("RAM state mode is not supported.")
-    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
-    locations = get_location(frame)
-    return get_state_tuple(locations, last_action)
+def _conv_out_size(h: int, w: int, kernel_size: int = 5, stride: int = 2) -> tuple[int, int]:
+    h1 = (h - kernel_size) // stride + 1
+    w1 = (w - kernel_size) // stride + 1
+    h2 = (h1 - kernel_size) // stride + 1
+    w2 = (w1 - kernel_size) // stride + 1
+    return h2, w2
 
 
 class DQN(torch.nn.Module):
-    def __init__(self, n_observations: int, n_actions: int):
+    """CNN that takes 4-class game map (1, H, W) and outputs Q-values for each action."""
+
+    def __init__(self, n_actions: int):
         super().__init__()
-        self.layer1 = torch.nn.Linear(n_observations, 128)
-        self.layer2 = torch.nn.Linear(128, 128)
-        self.layer3 = torch.nn.Linear(128, n_actions)
+        h, w = constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH
+        h_out, w_out = _conv_out_size(h, w)
+        self.conv1 = torch.nn.Conv2d(1, 16, kernel_size=5, stride=2)
+        self.conv2 = torch.nn.Conv2d(16, 32, kernel_size=5, stride=2)
+        self.flat_size = 32 * h_out * w_out
+        self.fc1 = torch.nn.Linear(self.flat_size, 128)
+        self.fc2 = torch.nn.Linear(128, n_actions)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = torch.nn.functional.relu(self.layer1(x))
-        x = torch.nn.functional.relu(self.layer2(x))
-        return self.layer3(x)
+        x = torch.nn.functional.relu(self.conv1(x))
+        x = torch.nn.functional.relu(self.conv2(x))
+        x = x.view(-1, self.flat_size)
+        x = torch.nn.functional.relu(self.fc1(x))
+        return self.fc2(x)
 
 
 class DQNTrainer:
@@ -85,8 +68,8 @@ class DQNTrainer:
             frameskip=constants.DQN_FRAME_SKIP,
         )
         self.n_actions = self.env.action_space.n - 1  # ignore NOOP
-        self.policy_net = DQN(constants.N_OBSERVATIONS, self.n_actions).to(self.device)
-        self.target_net = DQN(constants.N_OBSERVATIONS, self.n_actions).to(self.device)
+        self.policy_net = DQN(self.n_actions).to(self.device)
+        self.target_net = DQN(self.n_actions).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.optimizer = torch.optim.AdamW(
             self.policy_net.parameters(), lr=constants.LR, amsgrad=True
@@ -111,13 +94,14 @@ class DQNTrainer:
             }
         )
 
-    def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
-        """Build state tuple from raw observation (same logic as Q-learning)."""
-        return get_state_from_observation(observation, last_action)
+    def _preprocess_observation(self, observation: np.ndarray) -> np.ndarray:
+        """Convert RGB observation to 4-class map (H, W) uint8."""
+        return observation_to_class_map(observation)
 
-    def _state_to_tensor(self, state_tuple: tuple[int, ...]) -> torch.Tensor:
-        """Convert state tuple to (1, n_observations) float tensor."""
-        return torch.tensor([state_tuple], dtype=torch.float32, device=self.device)
+    def _observation_to_tensor(self, class_map: np.ndarray) -> torch.Tensor:
+        """Convert (H, W) class map to (1, 1, H, W) float tensor."""
+        x = torch.from_numpy(class_map).to(torch.float32).to(self.device)
+        return x.unsqueeze(0).unsqueeze(0)
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
@@ -189,8 +173,7 @@ class DQNTrainer:
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
             observation, _info = self.env.reset()
-            last_action = ACTION_WORD_TO_ID["LEFT"]
-            state = self._state_to_tensor(self._get_state(observation, last_action))
+            state = self._observation_to_tensor(self._preprocess_observation(observation))
             terminal_reward = 0.0
 
             for t in trange(constants.MAX_CYCLES, leave=False):
@@ -203,7 +186,9 @@ class DQNTrainer:
                 if terminated:
                     next_state = None
                 else:
-                    next_state = self._state_to_tensor(self._get_state(observation, action_id))
+                    next_state = self._observation_to_tensor(
+                        self._preprocess_observation(observation)
+                    )
 
                 self.memory.append(Transition(state, action, next_state, reward_t))
                 state = next_state
@@ -257,7 +242,7 @@ def _load_policy_net() -> DQN:
             raise FileNotFoundError(
                 f"DQN checkpoint not found: {constants.DQN_POLICY_NET_LATEST}. Run training first."
             )
-        _POLICY_NET_CACHE = DQN(constants.N_OBSERVATIONS, constants.N_ACTIONS).to(_DEVICE)
+        _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
         _POLICY_NET_CACHE.load_state_dict(
             torch.load(
                 constants.DQN_POLICY_NET_LATEST,
@@ -272,8 +257,8 @@ def _load_policy_net() -> DQN:
 def greedy_dqn_policy(action_space, observation, info, last_action):
     """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
     net = _load_policy_net()
-    state_tuple = get_state_from_observation(observation, last_action)
-    x = torch.tensor([state_tuple], dtype=torch.float32, device=_DEVICE)
+    class_map = observation_to_class_map(observation)
+    x = torch.from_numpy(class_map).to(torch.float32).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     with torch.no_grad():
         action_index = int(net(x).max(1).indices.item())
     return action_index + 1  # env action 1..4
