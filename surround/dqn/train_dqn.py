@@ -78,6 +78,8 @@ class DQNTrainer:
         self.steps_done = 0
         self.episode_durations: list[int] = []
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
+        if constants.DQN_LOG_DIR.exists():
+            raise FileExistsError(f"Log directory {constants.DQN_LOG_DIR} already exists.")
         self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
         self.writer.add_custom_scalars(
             {
