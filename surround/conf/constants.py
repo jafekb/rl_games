@@ -32,7 +32,7 @@ WINDOW_SIZE = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround_ql_visits")
 
-# DQN
+# DQN (input: 4-class game map of shape (1, DQN_GAME_HEIGHT, DQN_GAME_WIDTH))
 DQN_FRAME_SKIP = 4
 BATCH_SIZE = 128
 GAMMA_DQN = 0.99
@@ -43,9 +43,10 @@ TAU = 0.005
 LR = 3e-4
 MEMORY_CAPACITY = 10_000
 NUM_EPISODES = 10_000
-N_OBSERVATIONS = 7  # state tuple size from get_state_tuple
+DQN_GAME_HEIGHT = 162  # game crop rows (35:197)
+DQN_GAME_WIDTH = 152  # game crop cols (4:156)
 N_ACTIONS = 4  # Surround without NOOP
-DQN_LOG_DIR = Path("runs/surround_dqn_exp5")
+DQN_LOG_DIR = Path("runs/surround_dqn_exp6")
 DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"
 DQN_CHECKPOINT_INTERVAL = 50
 DQN_POLICY_NET_LATEST = DQN_CHECKPOINT_DIR / "policy_net_latest.pt"
