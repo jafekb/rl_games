@@ -121,9 +121,9 @@ class DQNTrainer:
             dtype=torch.long,
         )
 
-    def _optimize_model(self) -> None:
+    def _optimize_model(self) -> dict[str, float] | None:
         if len(self.memory) < constants.BATCH_SIZE:
-            return
+            return None
 
         transitions = random.sample(self.memory, constants.BATCH_SIZE)
         batch = Transition(*zip(*transitions))
@@ -148,10 +148,22 @@ class DQNTrainer:
         criterion = torch.nn.SmoothL1Loss()
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
 
+        td_errors = (expected_state_action_values.unsqueeze(1) - state_action_values).abs()
+        mean_td = td_errors.mean().item()
+        q_mean = self.policy_net(state_batch).max(1).values.mean().item()
+
         self.optimizer.zero_grad()
         loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), float("inf"))
         torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
+
+        return {
+            "loss": loss.item(),
+            "td_error": mean_td,
+            "q_mean": q_mean,
+            "grad_norm": grad_norm.item(),
+        }
 
     def _soft_update_target(self) -> None:
         target = self.target_net.state_dict()
@@ -177,6 +189,10 @@ class DQNTrainer:
             observation, _info = self.env.reset()
             state = self._observation_to_tensor(self._preprocess_observation(observation))
             terminal_reward = 0.0
+            episode_losses: list[float] = []
+            episode_td_errors: list[float] = []
+            episode_q_means: list[float] = []
+            episode_grad_norms: list[float] = []
 
             for t in trange(constants.MAX_CYCLES, leave=False):
                 action = self._select_action(state)
@@ -195,7 +211,12 @@ class DQNTrainer:
                 self.memory.append(Transition(state, action, next_state, reward_t))
                 state = next_state
 
-                self._optimize_model()
+                metrics = self._optimize_model()
+                if metrics is not None:
+                    episode_losses.append(metrics["loss"])
+                    episode_td_errors.append(metrics["td_error"])
+                    episode_q_means.append(metrics["q_mean"])
+                    episode_grad_norms.append(metrics["grad_norm"])
                 self._soft_update_target()
 
                 if done:
@@ -226,6 +247,28 @@ class DQNTrainer:
                         -1.0 * self.steps_done / constants.EPS_DECAY
                     )
                     self.writer.add_scalar("episode/epsilon", eps, episode_index)
+                    if episode_losses:
+                        n = len(episode_losses)
+                        self.writer.add_scalar(
+                            "episode/mean_huber_loss",
+                            sum(episode_losses) / n,
+                            episode_index,
+                        )
+                        self.writer.add_scalar(
+                            "episode/mean_td_error",
+                            sum(episode_td_errors) / n,
+                            episode_index,
+                        )
+                        self.writer.add_scalar(
+                            "episode/mean_q",
+                            sum(episode_q_means) / n,
+                            episode_index,
+                        )
+                        self.writer.add_scalar(
+                            "episode/mean_grad_norm",
+                            sum(episode_grad_norms) / n,
+                            episode_index,
+                        )
                     self._save_checkpoint(episode_index)
                     break
         self.writer.close()
