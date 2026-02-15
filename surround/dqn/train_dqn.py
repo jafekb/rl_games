@@ -24,12 +24,13 @@ from surround.utils.video_extract_locations import observation_to_class_map
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
 
-def _conv_out_size(h: int, w: int, kernel_size: int = 5, stride: int = 2) -> tuple[int, int]:
-    h1 = (h - kernel_size) // stride + 1
-    w1 = (w - kernel_size) // stride + 1
-    h2 = (h1 - kernel_size) // stride + 1
-    w2 = (w1 - kernel_size) // stride + 1
-    return h2, w2
+def _conv_out_size(
+    h: int, w: int, n_layers: int = 3, kernel_size: int = 5, stride: int = 2
+) -> tuple[int, int]:
+    for _ in range(n_layers):
+        h = (h - kernel_size) // stride + 1
+        w = (w - kernel_size) // stride + 1
+    return h, w
 
 
 class DQN(torch.nn.Module):
@@ -39,18 +40,22 @@ class DQN(torch.nn.Module):
         super().__init__()
         h, w = constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH
         h_out, w_out = _conv_out_size(h, w)
-        self.conv1 = torch.nn.Conv2d(1, 16, kernel_size=5, stride=2)
-        self.conv2 = torch.nn.Conv2d(16, 32, kernel_size=5, stride=2)
-        self.flat_size = 32 * h_out * w_out
-        self.fc1 = torch.nn.Linear(self.flat_size, 128)
-        self.fc2 = torch.nn.Linear(128, n_actions)
+        self.conv1 = torch.nn.Conv2d(1, 32, kernel_size=5, stride=2)
+        self.conv2 = torch.nn.Conv2d(32, 64, kernel_size=5, stride=2)
+        self.conv3 = torch.nn.Conv2d(64, 128, kernel_size=5, stride=2)
+        self.flat_size = 128 * h_out * w_out
+        self.fc1 = torch.nn.Linear(self.flat_size, 512)
+        self.fc2 = torch.nn.Linear(512, 128)
+        self.fc3 = torch.nn.Linear(128, n_actions)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.nn.functional.relu(self.conv1(x))
         x = torch.nn.functional.relu(self.conv2(x))
+        x = torch.nn.functional.relu(self.conv3(x))
         x = x.view(-1, self.flat_size)
         x = torch.nn.functional.relu(self.fc1(x))
-        return self.fc2(x)
+        x = torch.nn.functional.relu(self.fc2(x))
+        return self.fc3(x)
 
 
 class DQNTrainer:
