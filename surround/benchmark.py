@@ -35,6 +35,9 @@ POLICIES = {
 
 def run_episode(env, policy, seed, video_writer, episode_index: int):
     observation, info = env.reset(seed=seed)
+    reset_fn = getattr(policy, "reset", None)
+    if callable(reset_fn):
+        reset_fn()
     total = 0.0
     last_action = 1
     for cycle_step in trange(

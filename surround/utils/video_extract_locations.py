@@ -96,6 +96,33 @@ def observation_to_class_map(observation: np.ndarray) -> np.ndarray:
     return out
 
 
+def observation_to_onehot_80x80(
+    observation: np.ndarray,
+    *,
+    size: tuple[int, int] = (80, 80),
+) -> np.ndarray:
+    """
+    Convert an RGB observation to a one-hot (H, W, 3) map and downsample with nearest neighbor.
+
+    Channels are: 0=ego, 1=opponent, 2=wall. Empty pixels are (0, 0, 0).
+
+    Args:
+        observation: RGB image from the env, shape (height, width, 3).
+        size: (height, width) to resize to. Default (80, 80).
+
+    Returns:
+        (size[0], size[1], 3) array, dtype uint8, values in {0, 1}.
+    """
+    class_map = observation_to_class_map(observation)
+    h, w = size
+    resized = cv2.resize(class_map, (w, h), interpolation=cv2.INTER_NEAREST)
+    out = np.zeros((h, w, 3), dtype=np.uint8)
+    out[:, :, 0] = (resized == 3).astype(np.uint8)  # ego
+    out[:, :, 1] = (resized == 2).astype(np.uint8)  # opponent
+    out[:, :, 2] = (resized == 1).astype(np.uint8)  # wall
+    return out
+
+
 def main(images: list[Path]) -> None:
     for im_fn in images:
         image = cv2.imread(im_fn)

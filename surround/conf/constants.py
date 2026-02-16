@@ -32,8 +32,11 @@ WINDOW_SIZE = 7
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround_ql_visits")
 
-# DQN (input: 4-class game map of shape (1, DQN_GAME_HEIGHT, DQN_GAME_WIDTH))
+# DQN (input: stacked one-hot (DQN_FRAME_STACK, DQN_PREPROCESS_HEIGHT, DQN_PREPROCESS_WIDTH, 3))
 DQN_FRAME_SKIP = 4
+DQN_FRAME_STACK = 4
+DQN_PREPROCESS_HEIGHT = 80
+DQN_PREPROCESS_WIDTH = 80
 BATCH_SIZE = 128
 GAMMA_DQN = 0.99
 EPS_START = 0.9

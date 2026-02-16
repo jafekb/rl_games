@@ -19,7 +19,7 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.conf import constants
-from surround.utils.video_extract_locations import observation_to_class_map
+from surround.utils.video_extract_locations import observation_to_onehot_80x80
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
@@ -33,13 +33,15 @@ def _conv_out_size(h: int, w: int, kernel_size: int = 5, stride: int = 2) -> tup
 
 
 class DQN(torch.nn.Module):
-    """CNN that takes 4-class game map (1, H, W) and outputs Q-values for each action."""
+    """CNN that takes stacked one-hot (4 frames x 3 channels), 80x80, and outputs Q-values."""
 
     def __init__(self, n_actions: int):
         super().__init__()
-        h, w = constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH
+        h = constants.DQN_PREPROCESS_HEIGHT
+        w = constants.DQN_PREPROCESS_WIDTH
+        in_channels = constants.DQN_FRAME_STACK * 3  # 12
         h_out, w_out = _conv_out_size(h, w)
-        self.conv1 = torch.nn.Conv2d(1, 16, kernel_size=5, stride=2)
+        self.conv1 = torch.nn.Conv2d(in_channels, 16, kernel_size=5, stride=2)
         self.conv2 = torch.nn.Conv2d(16, 32, kernel_size=5, stride=2)
         self.flat_size = 32 * h_out * w_out
         self.fc1 = torch.nn.Linear(self.flat_size, 128)
@@ -75,6 +77,7 @@ class DQNTrainer:
             self.policy_net.parameters(), lr=constants.LR, amsgrad=True
         )
         self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
+        self._frame_buffer: deque = deque(maxlen=constants.DQN_FRAME_STACK)
         self.steps_done = 0
         self.episode_durations: list[int] = []
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
@@ -97,13 +100,22 @@ class DQNTrainer:
         )
 
     def _preprocess_observation(self, observation: np.ndarray) -> np.ndarray:
-        """Convert RGB observation to 4-class map (H, W) uint8."""
-        return observation_to_class_map(observation)
+        """Convert RGB observation to one-hot (H, W, 3) uint8, 80x80."""
+        return observation_to_onehot_80x80(
+            observation,
+            size=(constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH),
+        )
 
-    def _observation_to_tensor(self, class_map: np.ndarray) -> torch.Tensor:
-        """Convert (H, W) class map to (1, 1, H, W) float tensor."""
-        x = torch.from_numpy(class_map).to(torch.float32).to(self.device)
-        return x.unsqueeze(0).unsqueeze(0)
+    def _stacked_state(self) -> np.ndarray:
+        """Return current frame stack (4, H, W, 3)."""
+        return np.stack(self._frame_buffer, axis=0)
+
+    def _observation_to_tensor(self, stacked: np.ndarray) -> torch.Tensor:
+        """Convert (4, H, W, 3) stacked state to (1, 12, H, W) float tensor."""
+        x = torch.from_numpy(stacked).to(torch.float32).to(self.device)
+        # (4, H, W, 3) -> (1, 4*3, H, W)
+        x = x.permute(0, 3, 1, 2).reshape(1, constants.DQN_FRAME_STACK * 3, x.shape[1], x.shape[2])
+        return x
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
@@ -187,7 +199,11 @@ class DQNTrainer:
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
             observation, _info = self.env.reset()
-            state = self._observation_to_tensor(self._preprocess_observation(observation))
+            first_frame = self._preprocess_observation(observation)
+            self._frame_buffer.clear()
+            for _ in range(constants.DQN_FRAME_STACK):
+                self._frame_buffer.append(first_frame.copy())
+            state = self._observation_to_tensor(self._stacked_state())
             terminal_reward = 0.0
             episode_losses: list[float] = []
             episode_td_errors: list[float] = []
@@ -204,9 +220,8 @@ class DQNTrainer:
                 if terminated:
                     next_state = None
                 else:
-                    next_state = self._observation_to_tensor(
-                        self._preprocess_observation(observation)
-                    )
+                    self._frame_buffer.append(self._preprocess_observation(observation))
+                    next_state = self._observation_to_tensor(self._stacked_state())
 
                 self.memory.append(Transition(state, action, next_state, reward_t))
                 state = next_state
@@ -299,14 +314,52 @@ def _load_policy_net() -> DQN:
     return _POLICY_NET_CACHE
 
 
+def _preprocess_for_policy(observation: np.ndarray) -> np.ndarray:
+    """One-hot 80x80 frame for policy (shared logic)."""
+    return observation_to_onehot_80x80(
+        observation,
+        size=(constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH),
+    )
+
+
+class GreedyDQNPolicy:
+    """Stateful greedy policy with 4-frame stack; call reset() at episode start."""
+
+    def __init__(self) -> None:
+        self._buffer: deque = deque(maxlen=constants.DQN_FRAME_STACK)
+
+    def reset(self) -> None:
+        self._buffer.clear()
+
+    def __call__(self, action_space, observation, info, last_action):
+        net = _load_policy_net()
+        frame = _preprocess_for_policy(observation)
+        if len(self._buffer) < constants.DQN_FRAME_STACK:
+            while len(self._buffer) < constants.DQN_FRAME_STACK:
+                self._buffer.append(frame.copy())
+        else:
+            self._buffer.append(frame)
+        stacked = np.stack(self._buffer, axis=0)
+        x = torch.from_numpy(stacked).to(torch.float32).to(_DEVICE)
+        x = x.permute(0, 3, 1, 2).reshape(1, constants.DQN_FRAME_STACK * 3, x.shape[1], x.shape[2])
+        with torch.no_grad():
+            action_index = int(net(x).max(1).indices.item())
+        return action_index + 1  # env action 1..4
+
+
+_GREEDY_DQN_POLICY_INSTANCE = GreedyDQNPolicy()
+
+
 def greedy_dqn_policy(action_space, observation, info, last_action):
     """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
-    net = _load_policy_net()
-    class_map = observation_to_class_map(observation)
-    x = torch.from_numpy(class_map).to(torch.float32).to(_DEVICE).unsqueeze(0).unsqueeze(0)
-    with torch.no_grad():
-        action_index = int(net(x).max(1).indices.item())
-    return action_index + 1  # env action 1..4
+    return _GREEDY_DQN_POLICY_INSTANCE(action_space, observation, info, last_action)
+
+
+def _greedy_dqn_policy_reset() -> None:
+    _GREEDY_DQN_POLICY_INSTANCE.reset()
+
+
+greedy_dqn_policy.reset = _greedy_dqn_policy_reset  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":
