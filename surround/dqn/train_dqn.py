@@ -10,9 +10,11 @@ import logging
 import math
 import random
 from collections import deque, namedtuple
+from pathlib import Path
 
 import ale_py
 import gymnasium as gym
+import imageio.v2 as imageio
 import numpy as np
 import torch
 from tensorboardX import SummaryWriter
@@ -116,6 +118,23 @@ class DQNTrainer:
         # (4, H, W, 3) -> (1, 4*3, H, W)
         x = x.permute(0, 3, 1, 2).reshape(1, constants.DQN_FRAME_STACK * 3, x.shape[1], x.shape[2])
         return x
+
+    def visualize(self, log_dir: Path | None = None) -> None:
+        """Save the current 4 stacked frames as:
+        LOG_DIR/images/t0.png,
+        LOG_DIR/images/t-1.png,
+        LOG_DIR/images/t-2.png,
+        LOG_DIR/images/t-3.png (t0 = newest)."""
+        if len(self._frame_buffer) != constants.DQN_FRAME_STACK:
+            return
+        out_dir = (log_dir or constants.DQN_LOG_DIR) / "images"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # buffer[0]=oldest, buffer[3]=newest -> t-3, t-2, t-1, t0
+        names = ["t-3.png", "t-2.png", "t-1.png", "t0.png"]
+        for i, name in enumerate(names):
+            frame = self._frame_buffer[i]  # (H, W, 3) one-hot 0/1
+            rgb = (frame * 255).astype(np.uint8)  # ego=R, opponent=G, wall=B
+            imageio.imwrite(out_dir / name, rgb)
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
@@ -284,6 +303,8 @@ class DQNTrainer:
                             sum(episode_grad_norms) / n,
                             episode_index,
                         )
+                    if constants.VISUALIZE_DQN:
+                        self.visualize()
                     self._save_checkpoint(episode_index)
                     break
         self.writer.close()
