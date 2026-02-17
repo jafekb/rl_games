@@ -29,6 +29,23 @@ from surround.utils.video_extract_locations import get_location, observation_to_
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
 
+def epsilon_for_episode(
+    episode_index: int,
+    num_episodes: int,
+    decay_fraction: float,
+    eps_start: float,
+    eps_end: float,
+) -> float:
+    """Epsilon for the given episode (episode-fraction-based decay).
+
+    Decay is exponential over the first decay_fraction of num_episodes,
+    so the schedule scales with run length. By the end of the decay window
+    epsilon is ~95% of the way from eps_start to eps_end.
+    """
+    decay_episodes = max(1, int(num_episodes * decay_fraction))
+    return eps_end + (eps_start - eps_end) * math.exp(-episode_index / (decay_episodes / 3))
+
+
 def _conv_out_size(
     h: int, w: int, n_layers: int = 3, kernel_size: int = 5, stride: int = 2
 ) -> tuple[int, int]:
@@ -236,11 +253,14 @@ class DQNTrainer:
             torch.save(self.policy_net.state_dict(), path)
 
     def run(self) -> None:
-        decay_episodes = max(1, int(constants.NUM_EPISODES * constants.EPS_DECAY_FRACTION))
         for episode_index in trange(constants.NUM_EPISODES):
-            self._current_epsilon = constants.EPS_END + (
-                constants.EPS_START - constants.EPS_END
-            ) * math.exp(-episode_index / (decay_episodes / 3))
+            self._current_epsilon = epsilon_for_episode(
+                episode_index,
+                constants.NUM_EPISODES,
+                constants.EPS_DECAY_FRACTION,
+                constants.EPS_START,
+                constants.EPS_END,
+            )
             observation, _info = self.env.reset()
             video_writer = None
             if constants.VISUALIZE_EPISODES:
