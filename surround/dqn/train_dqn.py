@@ -204,9 +204,9 @@ class DQNTrainer:
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
             observation, _info = self.env.reset()
-            observation = observation.copy()
             video_writer = None
             if constants.VISUALIZE_EPISODES:
+                observation = observation.copy()
                 episodes_dir = constants.DQN_LOG_DIR / "episodes"
                 episodes_dir.mkdir(parents=True, exist_ok=True)
                 video_path = episodes_dir / f"episode_{episode_index:04d}.mp4"
@@ -230,8 +230,8 @@ class DQNTrainer:
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = self.env.step(action_id)
-                observation = observation.copy()
                 if video_writer is not None:
+                    observation = observation.copy()
                     video_writer.append_data(observation)
                 reward_t = torch.tensor([reward], device=self.device)
                 # Only train for 1 game, not the whole 10-point match.
