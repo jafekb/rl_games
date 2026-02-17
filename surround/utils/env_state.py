@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ale_py
-import cv2
 import gymnasium as gym
 import numpy as np
 
@@ -21,10 +20,11 @@ def make_env(
     difficulty: int,
     mode: int,
     *,
-    obs_type: str = "rgb",
+    obs_type: str = "grayscale",
     frameskip: int | None = 8,
     render_mode: str | None = None,
 ):
+    """Create ALE/Surround-v5 env. Default obs_type is grayscale; we do not use RGB."""
     gym.register_envs(ale_py)
     kwargs = {
         "obs_type": obs_type,
@@ -112,10 +112,10 @@ def build_state_from_observation(
     debug_state: bool = False,
 ) -> tuple[int, ...]:
     """
-    Builds a state from an observation.
+    Builds a state from a grayscale observation (H, W) or (H, W, 1).
 
     Args:
-        observation: The observation to build a state from.
+        observation: Grayscale observation from the env.
         last_action: Last action id (1..4).
         state_mode: The state mode to use.
         debug_state: If True, print the state tuple to stdout.
@@ -125,7 +125,8 @@ def build_state_from_observation(
     """
     if state_mode == "ram":
         raise ValueError("RAM state mode is not supported.")
-    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
+    # Observation is grayscale (H, W) or (H, W, 1)
+    frame = observation if observation.ndim == 2 else observation.squeeze()
     locations = get_location(frame)
     state = get_state_tuple(locations, last_action)
     if debug_state:
