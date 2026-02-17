@@ -30,7 +30,7 @@ WINDOW_SIZE = 7
 
 # Paths (Q-learning)
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
-LOG_DIR = Path("runs/surround_ql_visits")
+LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
 DQN_FRAME_SKIP = 4
@@ -46,7 +46,7 @@ NUM_EPISODES = 50_000
 DQN_GAME_HEIGHT = 162
 DQN_GAME_WIDTH = 152
 N_ACTIONS = 4
-DQN_LOG_DIR = Path("runs/surround_dqn_long_exp11")
+DQN_LOG_DIR = Path("runs/surround/dqn_long_exp11")
 DQN_EPISODE_VIDEO_FPS = 10
 VISUALIZE_EPISODES = False
 DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"

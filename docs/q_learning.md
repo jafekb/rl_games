@@ -47,10 +47,10 @@ stability and coverage:
 
 ### TensorBoard (Logging)
 
-Training logs to `runs/surround_q_learning`. To view them:
+Training logs to `runs/surround/q_learning`. To view them:
 
 ```
-uvx tensorboard --logdir runs
+uvx tensorboard --logdir runs/surround
 ```
 
 To see steps survived colored by outcome, open the Custom Scalars tab and select
