@@ -23,11 +23,19 @@ from git import Repo
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from surround.actions import ACTION_WORD_TO_ID
 from surround.conf import constants
-from surround.utils.video_extract_locations import get_location
+from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
+
+
+def _conv_out_size(
+    h: int, w: int, n_layers: int = 3, kernel_size: int = 5, stride: int = 2
+) -> tuple[int, int]:
+    for _ in range(n_layers):
+        h = (h - kernel_size) // stride + 1
+        w = (w - kernel_size) // stride + 1
+    return h, w
 
 
 def _get_run_metadata() -> dict:
@@ -71,16 +79,28 @@ def get_state_from_observation(observation: np.ndarray, last_action: int) -> tup
 
 
 class DQN(torch.nn.Module):
-    def __init__(self, n_observations: int, n_actions: int):
+    """CNN that takes 4-class game map (1, H, W) and outputs Q-values for each action."""
+
+    def __init__(self, n_actions: int):
         super().__init__()
-        self.layer1 = torch.nn.Linear(n_observations, 128)
-        self.layer2 = torch.nn.Linear(128, 128)
-        self.layer3 = torch.nn.Linear(128, n_actions)
+        h, w = constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH
+        h_out, w_out = _conv_out_size(h, w)
+        self.conv1 = torch.nn.Conv2d(1, 32, kernel_size=5, stride=2)
+        self.conv2 = torch.nn.Conv2d(32, 64, kernel_size=5, stride=2)
+        self.conv3 = torch.nn.Conv2d(64, 128, kernel_size=5, stride=2)
+        self.flat_size = 128 * h_out * w_out
+        self.fc1 = torch.nn.Linear(self.flat_size, 512)
+        self.fc2 = torch.nn.Linear(512, 128)
+        self.fc3 = torch.nn.Linear(128, n_actions)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = torch.nn.functional.relu(self.layer1(x))
-        x = torch.nn.functional.relu(self.layer2(x))
-        return self.layer3(x)
+        x = torch.nn.functional.relu(self.conv1(x))
+        x = torch.nn.functional.relu(self.conv2(x))
+        x = torch.nn.functional.relu(self.conv3(x))
+        x = x.view(-1, self.flat_size)
+        x = torch.nn.functional.relu(self.fc1(x))
+        x = torch.nn.functional.relu(self.fc2(x))
+        return self.fc3(x)
 
 
 class DQNTrainer:
@@ -98,8 +118,8 @@ class DQNTrainer:
             frameskip=constants.DQN_FRAME_SKIP,
         )
         self.n_actions = self.env.action_space.n - 1  # ignore NOOP
-        self.policy_net = DQN(constants.N_OBSERVATIONS, self.n_actions).to(self.device)
-        self.target_net = DQN(constants.N_OBSERVATIONS, self.n_actions).to(self.device)
+        self.policy_net = DQN(self.n_actions).to(self.device)
+        self.target_net = DQN(self.n_actions).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.optimizer = torch.optim.AdamW(
             self.policy_net.parameters(), lr=constants.LR, amsgrad=True
@@ -129,13 +149,14 @@ class DQNTrainer:
             }
         )
 
-    def _get_state(self, observation: np.ndarray, last_action: int) -> tuple[int, ...]:
-        """Build state tuple from raw observation (same logic as Q-learning)."""
-        return get_state_from_observation(observation, last_action)
+    def _preprocess_observation(self, observation: np.ndarray) -> np.ndarray:
+        """Convert grayscale observation to 4-class map (H, W) uint8."""
+        return observation_to_class_map(observation)
 
-    def _state_to_tensor(self, state_tuple: tuple[int, ...]) -> torch.Tensor:
-        """Convert state tuple to (1, n_observations) float tensor."""
-        return torch.tensor([state_tuple], dtype=torch.float32, device=self.device)
+    def _observation_to_tensor(self, class_map: np.ndarray) -> torch.Tensor:
+        """Convert (H, W) class map to (1, 1, H, W) float tensor."""
+        x = torch.from_numpy(class_map).to(torch.float32).to(self.device)
+        return x.unsqueeze(0).unsqueeze(0)
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
@@ -237,8 +258,7 @@ class DQNTrainer:
                     macro_block_size=1,
                 )
                 video_writer.append_data(observation)
-            last_action = ACTION_WORD_TO_ID["LEFT"]
-            state = self._state_to_tensor(self._get_state(observation, last_action))
+            state = self._observation_to_tensor(self._preprocess_observation(observation))
             terminal_reward = 0.0
             episode_start_time = time.perf_counter()
             episode_losses: list[float] = []
@@ -259,7 +279,9 @@ class DQNTrainer:
                 if terminated:
                     next_state = None
                 else:
-                    next_state = self._state_to_tensor(self._get_state(observation, action_id))
+                    next_state = self._observation_to_tensor(
+                        self._preprocess_observation(observation)
+                    )
 
                 self.memory.append(Transition(state, action, next_state, reward_t))
                 state = next_state
@@ -346,7 +368,7 @@ def _load_policy_net() -> DQN:
             raise FileNotFoundError(
                 f"DQN checkpoint not found: {constants.DQN_POLICY_NET_LATEST}. Run training first."
             )
-        _POLICY_NET_CACHE = DQN(constants.N_OBSERVATIONS, constants.N_ACTIONS).to(_DEVICE)
+        _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
         _POLICY_NET_CACHE.load_state_dict(
             torch.load(
                 constants.DQN_POLICY_NET_LATEST,
@@ -361,8 +383,8 @@ def _load_policy_net() -> DQN:
 def greedy_dqn_policy(action_space, observation, info, last_action):
     """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
     net = _load_policy_net()
-    state_tuple = get_state_from_observation(observation, last_action)
-    x = torch.tensor([state_tuple], dtype=torch.float32, device=_DEVICE)
+    class_map = observation_to_class_map(observation)
+    x = torch.from_numpy(class_map).to(torch.float32).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     with torch.no_grad():
         action_index = int(net(x).max(1).indices.item())
     return action_index + 1  # env action 1..4
