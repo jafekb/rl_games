@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import random
+import time
 from collections import deque, namedtuple
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -239,6 +240,7 @@ class DQNTrainer:
             last_action = ACTION_WORD_TO_ID["LEFT"]
             state = self._state_to_tensor(self._get_state(observation, last_action))
             terminal_reward = 0.0
+            episode_start_time = time.perf_counter()
             episode_losses: list[float] = []
             episode_td_errors: list[float] = []
             episode_q_means: list[float] = []
@@ -274,7 +276,11 @@ class DQNTrainer:
                     terminal_reward = float(reward)
                     steps_survived = t + 1
                     self.episode_durations.append(steps_survived)
-
+                    elapsed = time.perf_counter() - episode_start_time
+                    steps_per_second = steps_survived / elapsed if elapsed > 0 else 0.0
+                    self.writer.add_scalar(
+                        "episode/steps_per_second", steps_per_second, episode_index
+                    )
                     self.writer.add_scalar("episode/steps_survived", steps_survived, episode_index)
                     self.writer.add_scalar(
                         "episode/terminal_reward", terminal_reward, episode_index
