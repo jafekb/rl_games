@@ -24,6 +24,7 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.conf import constants
+from surround.utils.checkpoint import load_checkpoint, save_checkpoint
 from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -143,6 +144,7 @@ class DQNTrainer:
         )
         self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
         self.episode_durations: list[int] = []
+        self.best_steps_survived = 0
         if constants.DQN_LOG_DIR.exists():
             raise FileExistsError(
                 f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
@@ -236,21 +238,28 @@ class DQNTrainer:
             target[key] = policy[key] * constants.TAU + target[key] * (1 - constants.TAU)
         self.target_net.load_state_dict(target)
 
-    def _save_checkpoint(self, episode_index: int) -> None:
-        constants.DQN_CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    def _save_checkpoint(self, episode_index: int, steps_survived: int | None = None) -> None:
         ep = episode_index + 1
-        torch.save(self.policy_net.state_dict(), constants.DQN_POLICY_NET_LATEST)
-        metadata = {
-            **self._run_metadata,
-            "episode_index": episode_index,
-            "episodes_completed": ep,
-        }
+        meta = {**self._run_metadata, "episodes_completed": ep}
+        save_checkpoint(
+            constants.DQN_POLICY_NET_LATEST,
+            self.policy_net.state_dict(),
+            steps_survived=steps_survived,
+            **meta,
+        )
+        json_meta = (
+            {**meta, "best_steps_survived": self.best_steps_survived}
+            if self.best_steps_survived > 0
+            else meta
+        )
         constants.DQN_CHECKPOINT_METADATA.write_text(
-            json.dumps(metadata, indent=2), encoding="utf-8"
+            json.dumps(json_meta, indent=2), encoding="utf-8"
         )
         if ep % constants.DQN_CHECKPOINT_INTERVAL == 0:
             path = constants.DQN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
-            torch.save(self.policy_net.state_dict(), path)
+            save_checkpoint(
+                path, self.policy_net.state_dict(), steps_survived=steps_survived, **meta
+            )
 
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
@@ -364,7 +373,15 @@ class DQNTrainer:
                             sum(episode_grad_norms) / n,
                             episode_index,
                         )
-                    self._save_checkpoint(episode_index)
+                    if steps_survived > self.best_steps_survived:
+                        self.best_steps_survived = steps_survived
+                        save_checkpoint(
+                            constants.DQN_POLICY_NET_BEST,
+                            self.policy_net.state_dict(),
+                            steps_survived=steps_survived,
+                            **{**self._run_metadata, "episodes_completed": episode_index + 1},
+                        )
+                    self._save_checkpoint(episode_index, steps_survived=steps_survived)
                     break
             if video_writer is not None:
                 video_writer.close()
@@ -385,13 +402,8 @@ def _load_policy_net() -> DQN:
                 f"DQN checkpoint not found: {constants.DQN_POLICY_NET_LATEST}. Run training first."
             )
         _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
-        _POLICY_NET_CACHE.load_state_dict(
-            torch.load(
-                constants.DQN_POLICY_NET_LATEST,
-                map_location=_DEVICE,
-                weights_only=True,
-            )
-        )
+        state_dict, _ = load_checkpoint(constants.DQN_POLICY_NET_LATEST, map_location=_DEVICE)
+        _POLICY_NET_CACHE.load_state_dict(state_dict)
         _POLICY_NET_CACHE.eval()
     return _POLICY_NET_CACHE
 
