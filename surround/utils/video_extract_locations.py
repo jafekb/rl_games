@@ -30,12 +30,19 @@ def mask_to_grid_locations(mask: np.ndarray) -> Set[tuple[int, int]]:
     return locations
 
 
+# Grayscale intensity ranges for ego/opponent/walls/(background)
+EGO_GRAY = 179
+OPP_GRAY = 110
+WALLS_GRAY = 149
+BACKGROUND_GRAY = 104
+
+
 def get_location(image: np.ndarray) -> dict:
     """
-    Extracts the locations of the ego, opponent, and walls from an image.
+    Extracts the locations of the ego, opponent, and walls from a grayscale image.
 
     Args:
-        image: The input game image in BGR format.
+        image: Grayscale game image (H, W).
 
     Returns:
         A dictionary containing the locations of the ego, opponent, and walls.
@@ -45,10 +52,11 @@ def get_location(image: np.ndarray) -> dict:
         "opp": None,
         "walls": set(),
     }
-    game = image[35:197, 4:156, :]
-    ego = cv2.inRange(game, (90, 192, 180), (100, 197, 185))
-    opponent = cv2.inRange(game, (70, 70, 195), (75, 75, 205))
-    walls = cv2.inRange(game, (190, 100, 210), (200, 110, 220))
+    assert image.ndim == 2, "Image must be grayscale (H, W)."
+    game = image[35:198, 4:156]
+    ego = (game == EGO_GRAY).astype(np.uint8) * 255
+    opponent = (game == OPP_GRAY).astype(np.uint8) * 255
+    walls = (game == WALLS_GRAY).astype(np.uint8) * 255
     x, y = np.where(ego)
     if x.size > 0 and y.size > 0:
         locations["ego"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
@@ -56,21 +64,20 @@ def get_location(image: np.ndarray) -> dict:
     if x.size > 0 and y.size > 0:
         locations["opp"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
     locations["walls"] = mask_to_grid_locations(walls)
-
     if VISUALIZE:
         cv2.imwrite(EXTRACT_DIR / "1_orig.png", image)
         cv2.imwrite(EXTRACT_DIR / "2_game.png", game)
         cv2.imwrite(EXTRACT_DIR / "3_ego.png", ego)
         cv2.imwrite(EXTRACT_DIR / "4_opponent.png", opponent)
         cv2.imwrite(EXTRACT_DIR / "5_walls.png", walls)
-
     return locations
 
 
 def main(images: list[Path]) -> None:
     for im_fn in images:
         image = cv2.imread(im_fn)
-        locs = get_location(image)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        locs = get_location(gray)
         print(im_fn.stem, locs)
 
     print("Done!")

@@ -12,7 +12,6 @@ import random
 from collections import deque, namedtuple
 
 import ale_py
-import cv2
 import gymnasium as gym
 import imageio.v2 as imageio
 import numpy as np
@@ -53,8 +52,7 @@ def get_state_from_observation(observation: np.ndarray, last_action: int) -> tup
     """Build state tuple from raw observation (for policy / benchmark)."""
     if constants.STATE_MODE == "ram":
         raise ValueError("RAM state mode is not supported.")
-    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
-    locations = get_location(frame)
+    locations = get_location(observation)
     return get_state_tuple(locations, last_action)
 
 
@@ -79,7 +77,7 @@ class DQNTrainer:
         gym.register_envs(ale_py)
         self.env = gym.make(
             "ALE/Surround-v5",
-            obs_type="rgb",
+            obs_type="grayscale",
             full_action_space=False,
             difficulty=constants.DIFFICULTY,
             mode=constants.MODE,
