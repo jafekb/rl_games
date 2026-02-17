@@ -143,6 +143,7 @@ class DQNTrainer:
         )
         self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
         self.episode_durations: list[int] = []
+        self.best_steps_survived = 0
         if constants.DQN_LOG_DIR.exists():
             raise FileExistsError(
                 f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
@@ -365,6 +366,12 @@ class DQNTrainer:
                             episode_index,
                         )
                     self._save_checkpoint(episode_index)
+                    if steps_survived > self.best_steps_survived:
+                        self.best_steps_survived = steps_survived
+                        torch.save(
+                            self.policy_net.state_dict(),
+                            constants.DQN_POLICY_NET_BEST,
+                        )
                     break
             if video_writer is not None:
                 video_writer.close()
