@@ -125,7 +125,6 @@ class DQNTrainer:
             self.policy_net.parameters(), lr=constants.LR, amsgrad=True
         )
         self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
-        self.steps_done = 0
         self.episode_durations: list[int] = []
         if constants.DQN_LOG_DIR.exists():
             raise FileExistsError(
@@ -160,12 +159,7 @@ class DQNTrainer:
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
-        eps_threshold = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
-            -1.0 * self.steps_done / constants.EPS_DECAY
-        )
-        self.steps_done += 1
-
-        if sample > eps_threshold:
+        if sample > self._current_epsilon:
             with torch.no_grad():
                 return self.policy_net(state).max(1).indices.view(1, 1)
         return torch.tensor(
@@ -242,7 +236,11 @@ class DQNTrainer:
             torch.save(self.policy_net.state_dict(), path)
 
     def run(self) -> None:
+        decay_episodes = max(1, int(constants.NUM_EPISODES * constants.EPS_DECAY_FRACTION))
         for episode_index in trange(constants.NUM_EPISODES):
+            self._current_epsilon = constants.EPS_END + (
+                constants.EPS_START - constants.EPS_END
+            ) * math.exp(-episode_index / (decay_episodes / 3))
             observation, _info = self.env.reset()
             video_writer = None
             if constants.VISUALIZE_EPISODES:
@@ -323,10 +321,7 @@ class DQNTrainer:
                         steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
-                    eps = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
-                        -1.0 * self.steps_done / constants.EPS_DECAY
-                    )
-                    self.writer.add_scalar("episode/epsilon", eps, episode_index)
+                    self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
                     if episode_losses:
                         n = len(episode_losses)
                         self.writer.add_scalar(
