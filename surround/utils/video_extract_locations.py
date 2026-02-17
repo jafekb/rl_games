@@ -14,7 +14,7 @@ X_SIZE = 9
 Y_SIZE = 4
 
 # Crop bounds for the game region
-GAME_ROW_SLICE = slice(35, 197)
+GAME_ROW_SLICE = slice(35, 198)
 GAME_COL_SLICE = slice(4, 156)
 
 VISUALIZE = False
