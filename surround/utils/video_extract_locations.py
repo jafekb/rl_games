@@ -13,6 +13,10 @@ EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
 X_SIZE = 9
 Y_SIZE = 4
 
+# Crop bounds for the game region
+GAME_ROW_SLICE = slice(35, 198)
+GAME_COL_SLICE = slice(4, 156)
+
 VISUALIZE = False
 
 
@@ -47,13 +51,13 @@ def get_location(image: np.ndarray) -> dict:
     Returns:
         A dictionary containing the locations of the ego, opponent, and walls.
     """
+    assert image.ndim == 2, "Image must be grayscale (H, W)."
     locations = {
         "ego": None,
         "opp": None,
         "walls": set(),
     }
-    assert image.ndim == 2, "Image must be grayscale (H, W)."
-    game = image[35:198, 4:156]
+    game = image[GAME_ROW_SLICE, GAME_COL_SLICE]
     ego = (game == EGO_GRAY).astype(np.uint8) * 255
     opponent = (game == OPP_GRAY).astype(np.uint8) * 255
     walls = (game == WALLS_GRAY).astype(np.uint8) * 255
@@ -73,8 +77,32 @@ def get_location(image: np.ndarray) -> dict:
     return locations
 
 
+def observation_to_class_map(observation: np.ndarray) -> np.ndarray:
+    """
+    Convert a grayscale observation to a single (H, W) array with 4 pixel classes.
+
+    Uses the same game crop and grayscale intensity constants as get_location.
+    Each pixel is assigned one of: 0=empty, 1=wall, 2=opponent, 3=ego
+    (priority: ego > opponent > wall > empty).
+
+    Args:
+        observation: Grayscale image from the env, shape (height, width).
+
+    Returns:
+        (H, W) array, dtype uint8, values in {0, 1, 2, 3}.
+    """
+    assert observation.ndim == 2, "Observation must be grayscale (H, W)."
+    game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
+    out = np.zeros(game.shape, dtype=np.uint8)
+    out[game == WALLS_GRAY] = 1
+    out[game == OPP_GRAY] = 2
+    out[game == EGO_GRAY] = 3
+    return out
+
+
 def main(images: list[Path]) -> None:
-    """Run location extraction on image files (BGR from disk). Live env gives grayscale."""
+    """Run location extraction on image files.
+    Converts BGR from disk to grayscale for get_location."""
     for im_fn in images:
         image = cv2.imread(im_fn)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
