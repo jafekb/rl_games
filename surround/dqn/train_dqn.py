@@ -240,11 +240,7 @@ class DQNTrainer:
 
     def _save_checkpoint(self, episode_index: int, steps_survived: int | None = None) -> None:
         ep = episode_index + 1
-        meta = {
-            **self._run_metadata,
-            "episode_index": episode_index,
-            "episodes_completed": ep,
-        }
+        meta = {**self._run_metadata, "episodes_completed": ep}
         save_checkpoint(
             constants.DQN_POLICY_NET_LATEST,
             self.policy_net.state_dict(),
@@ -377,11 +373,7 @@ class DQNTrainer:
                             constants.DQN_POLICY_NET_BEST,
                             self.policy_net.state_dict(),
                             steps_survived=steps_survived,
-                            **{
-                                **self._run_metadata,
-                                "episode_index": episode_index,
-                                "episodes_completed": episode_index + 1,
-                            },
+                            **{**self._run_metadata, "episodes_completed": episode_index + 1},
                         )
                     break
             if video_writer is not None:
