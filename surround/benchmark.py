@@ -12,12 +12,12 @@ if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from surround import constants
-from surround.dqn.train_dqn import greedy_dqn_policy
+from surround.policies.snake_baseline import snake_policy
 from surround.utils.env_state import make_env
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 100_000
-EPISODES = 10
+EPISODES = 500
 RECORD_VIDEO = True
 VIDEO_DIR = Path("video")
 VIDEO_FPS = 120
@@ -27,14 +27,14 @@ FRAME_STRIDE = 4
 POLICIES = {
     # "random": random_policy,
     # "human": get_human_action,
-    "dqn": greedy_dqn_policy,
+    # "dqn": greedy_dqn_policy,
     # "q_learning": greedy_q_policy,
-    # "snake": snake_policy,
+    "snake": snake_policy,
 }
 
 
 def run_episode(env, policy, seed, video_writer, episode_index: int):
-    observation, info = env.reset(seed=seed)
+    observation, info = env.reset(seed=None)  # TODO(bjafek) revert
     total = 0.0
     last_action = 1
     for cycle_step in trange(
@@ -48,13 +48,25 @@ def run_episode(env, policy, seed, video_writer, episode_index: int):
         if video_writer is not None and cycle_step % FRAME_STRIDE == 0:
             frame = env.render()
             if frame is not None:
+                import cv2
+
+                cv2.putText(
+                    frame,
+                    f"Step: {cycle_step}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (255, 255, 0),
+                    1,
+                )
                 video_writer.append_data(frame)
             # imageio.imwrite(f"video/frame_{cycle_step:04d}.png", frame)
 
-        if terminated or truncated:
+        done = terminated or truncated or abs(reward) == 1
+        if done:
             break
         last_action = action
-    return total
+    return total, cycle_step + 1
 
 
 def summarize(returns):
@@ -93,8 +105,9 @@ def main() -> None:
                     macro_block_size=1,
                 )
             returns = []
+            steps_survived = []
             for episode in trange(EPISODES, desc=f"Episodes ({policy_name})"):
-                total = run_episode(
+                total, steps = run_episode(
                     env,
                     policy,
                     seed=constants.SEED + episode,
@@ -102,6 +115,7 @@ def main() -> None:
                     episode_index=episode,
                 )
                 returns.append(total)
+                steps_survived.append(steps)
             results[policy_name] = summarize(returns)
             if video_writer is not None:
                 video_writer.close()
@@ -117,6 +131,11 @@ def main() -> None:
         else:
             name_label = policy_name
         print(f"{name_label}: mean_return={stats['mean']:.2f} std={stats['std']:.2f}")
+        print(
+            f"\t: mean_steps_survived={mean(steps_survived):.2f} std={pstdev(steps_survived):.2f}"
+        )
+    with Path("steps_survived.json").open("w") as f:
+        json.dump(steps_survived, f)
 
 
 if __name__ == "__main__":
