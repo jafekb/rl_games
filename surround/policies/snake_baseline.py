@@ -1,7 +1,5 @@
 from typing import Set
 
-import cv2
-
 from surround import constants
 from surround.actions import ACTION_WORD_TO_ID, ACTION_WORDS_4
 from surround.utils.video_extract_locations import get_location
@@ -34,8 +32,8 @@ def get_action(
 
 
 def snake_policy(action_space, observation, info, last_action) -> int:
-    # my extractor function inherits cv2's BGR convention.
-    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
+    # Observation is grayscale (H, W) or (H, W, 1).
+    frame = observation if observation.ndim == 2 else observation.squeeze()
     locations = get_location(frame)
     safe_action = max(1, min(last_action, len(ACTION_WORDS_4)))
     action = get_action(locations, ACTION_WORDS_4[safe_action - 1])

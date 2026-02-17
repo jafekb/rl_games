@@ -9,17 +9,22 @@ import json
 import logging
 import math
 import random
+import time
 from collections import deque, namedtuple
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import ale_py
 import gymnasium as gym
+import imageio.v2 as imageio
 import numpy as np
 import torch
+from git import Repo
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.conf import constants
-from surround.utils.video_extract_locations import observation_to_class_map
+from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
@@ -31,6 +36,46 @@ def _conv_out_size(
         h = (h - kernel_size) // stride + 1
         w = (w - kernel_size) // stride + 1
     return h, w
+
+
+def _get_run_metadata() -> dict:
+    """Return dict with git_commit, git_branch, timestamp for run metadata."""
+    repo = Repo(".", search_parent_directories=True)
+    return {
+        "timestamp": datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "git_commit": repo.head.commit.hexsha,
+        "git_branch": repo.active_branch.name,
+    }
+
+
+def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
+    """Build state tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)."""
+    if locations["ego"] is None or locations["opp"] is None:
+        return (1, 1, 1, 1, 1, 1, last_action)
+    ego_row, ego_col = locations["ego"]
+    opp_row, opp_col = locations["opp"]
+    wall_set = locations["walls"]
+    collisions = (
+        wall_set | {(opp_row, opp_col)} if opp_row is not None and opp_col is not None else wall_set
+    )
+
+    d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
+    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= constants.GRID_COLS - 1 else 0
+    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= constants.GRID_ROWS - 1 else 0
+
+    rel_x = 0 if opp_col < ego_col else (2 if opp_col > ego_col else 1)
+    rel_y = 0 if opp_row < ego_row else (2 if opp_row > ego_row else 1)
+
+    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
+
+
+def get_state_from_observation(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
+    """Build state tuple from grayscale observation (for policy / benchmark)."""
+    if constants.STATE_MODE == "ram":
+        raise ValueError("RAM state mode is not supported.")
+    locations = get_location(observation)
+    return get_state_tuple(locations, last_action)
 
 
 class DQN(torch.nn.Module):
@@ -66,7 +111,7 @@ class DQNTrainer:
         gym.register_envs(ale_py)
         self.env = gym.make(
             "ALE/Surround-v5",
-            obs_type="rgb",
+            obs_type="grayscale",
             full_action_space=False,
             difficulty=constants.DIFFICULTY,
             mode=constants.MODE,
@@ -82,9 +127,12 @@ class DQNTrainer:
         self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
         self.steps_done = 0
         self.episode_durations: list[int] = []
-        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         if constants.DQN_LOG_DIR.exists():
-            raise FileExistsError(f"Log directory {constants.DQN_LOG_DIR} already exists.")
+            raise FileExistsError(
+                f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
+            )
+        self._run_metadata = _get_run_metadata()
+        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
         self.writer.add_custom_scalars(
             {
@@ -102,7 +150,7 @@ class DQNTrainer:
         )
 
     def _preprocess_observation(self, observation: np.ndarray) -> np.ndarray:
-        """Convert RGB observation to 4-class map (H, W) uint8."""
+        """Convert grayscale observation to 4-class map (H, W) uint8."""
         return observation_to_class_map(observation)
 
     def _observation_to_tensor(self, class_map: np.ndarray) -> torch.Tensor:
@@ -181,7 +229,11 @@ class DQNTrainer:
         constants.DQN_CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
         ep = episode_index + 1
         torch.save(self.policy_net.state_dict(), constants.DQN_POLICY_NET_LATEST)
-        metadata = {"episode_index": episode_index, "episodes_completed": ep}
+        metadata = {
+            **self._run_metadata,
+            "episode_index": episode_index,
+            "episodes_completed": ep,
+        }
         constants.DQN_CHECKPOINT_METADATA.write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"
         )
@@ -192,8 +244,23 @@ class DQNTrainer:
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
             observation, _info = self.env.reset()
+            video_writer = None
+            if constants.VISUALIZE_EPISODES:
+                observation = observation.copy()
+                episodes_dir = constants.DQN_LOG_DIR / "episodes"
+                episodes_dir.mkdir(parents=True, exist_ok=True)
+                video_path = episodes_dir / f"episode_{episode_index:04d}.mp4"
+                video_writer = imageio.get_writer(
+                    str(video_path),
+                    fps=constants.DQN_EPISODE_VIDEO_FPS,
+                    codec="libx264",
+                    quality=8,
+                    macro_block_size=1,
+                )
+                video_writer.append_data(observation)
             state = self._observation_to_tensor(self._preprocess_observation(observation))
             terminal_reward = 0.0
+            episode_start_time = time.perf_counter()
             episode_losses: list[float] = []
             episode_td_errors: list[float] = []
             episode_q_means: list[float] = []
@@ -203,6 +270,9 @@ class DQNTrainer:
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = self.env.step(action_id)
+                if video_writer is not None:
+                    observation = observation.copy()
+                    video_writer.append_data(observation)
                 reward_t = torch.tensor([reward], device=self.device)
                 done = terminated or truncated
 
@@ -228,7 +298,11 @@ class DQNTrainer:
                     terminal_reward = float(reward)
                     steps_survived = t + 1
                     self.episode_durations.append(steps_survived)
-
+                    elapsed = time.perf_counter() - episode_start_time
+                    steps_per_second = steps_survived / elapsed if elapsed > 0 else 0.0
+                    self.writer.add_scalar(
+                        "episode/steps_per_second", steps_per_second, episode_index
+                    )
                     self.writer.add_scalar("episode/steps_survived", steps_survived, episode_index)
                     self.writer.add_scalar(
                         "episode/terminal_reward", terminal_reward, episode_index
@@ -276,6 +350,8 @@ class DQNTrainer:
                         )
                     self._save_checkpoint(episode_index)
                     break
+            if video_writer is not None:
+                video_writer.close()
         self.writer.close()
         print("Training complete!")
 
