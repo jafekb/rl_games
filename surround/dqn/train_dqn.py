@@ -14,6 +14,7 @@ from collections import deque, namedtuple
 import ale_py
 import cv2
 import gymnasium as gym
+import imageio.v2 as imageio
 import numpy as np
 import torch
 from tensorboardX import SummaryWriter
@@ -94,6 +95,10 @@ class DQNTrainer:
         self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
         self.steps_done = 0
         self.episode_durations: list[int] = []
+        if constants.DQN_LOG_DIR.exists():
+            raise FileExistsError(
+                f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
+            )
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
         self.writer.add_custom_scalars(
@@ -201,6 +206,20 @@ class DQNTrainer:
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
             observation, _info = self.env.reset()
+            observation = observation.copy()
+            video_writer = None
+            if constants.VISUALIZE_EPISODES:
+                episodes_dir = constants.DQN_LOG_DIR / "episodes"
+                episodes_dir.mkdir(parents=True, exist_ok=True)
+                video_path = episodes_dir / f"episode_{episode_index:04d}.mp4"
+                video_writer = imageio.get_writer(
+                    str(video_path),
+                    fps=constants.DQN_EPISODE_VIDEO_FPS,
+                    codec="libx264",
+                    quality=8,
+                    macro_block_size=1,
+                )
+                video_writer.append_data(observation)
             last_action = ACTION_WORD_TO_ID["LEFT"]
             state = self._state_to_tensor(self._get_state(observation, last_action))
             terminal_reward = 0.0
@@ -213,8 +232,12 @@ class DQNTrainer:
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = self.env.step(action_id)
+                observation = observation.copy()
+                if video_writer is not None:
+                    video_writer.append_data(observation)
                 reward_t = torch.tensor([reward], device=self.device)
-                done = terminated or truncated
+                # Only train for 1 game, not the whole 10-point match.
+                done = terminated or truncated or abs(reward) == 1
 
                 if terminated:
                     next_state = None
@@ -284,6 +307,8 @@ class DQNTrainer:
                         )
                     self._save_checkpoint(episode_index)
                     break
+            if video_writer is not None:
+                video_writer.close()
         self.writer.close()
         print("Training complete!")
 
