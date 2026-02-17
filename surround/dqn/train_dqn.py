@@ -29,6 +29,23 @@ from surround.utils.video_extract_locations import get_location, observation_to_
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
 
+def epsilon_for_episode(
+    episode_index: int,
+    num_episodes: int,
+    decay_fraction: float,
+    eps_start: float,
+    eps_end: float,
+) -> float:
+    """Epsilon for the given episode (episode-fraction-based decay).
+
+    Decay is exponential over the first decay_fraction of num_episodes,
+    so the schedule scales with run length. By the end of the decay window
+    epsilon is ~95% of the way from eps_start to eps_end.
+    """
+    decay_episodes = max(1, int(num_episodes * decay_fraction))
+    return eps_end + (eps_start - eps_end) * math.exp(-episode_index / (decay_episodes / 3))
+
+
 def _conv_out_size(
     h: int, w: int, n_layers: int = 3, kernel_size: int = 5, stride: int = 2
 ) -> tuple[int, int]:
@@ -125,7 +142,6 @@ class DQNTrainer:
             self.policy_net.parameters(), lr=constants.LR, amsgrad=True
         )
         self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
-        self.steps_done = 0
         self.episode_durations: list[int] = []
         if constants.DQN_LOG_DIR.exists():
             raise FileExistsError(
@@ -160,12 +176,7 @@ class DQNTrainer:
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
-        eps_threshold = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
-            -1.0 * self.steps_done / constants.EPS_DECAY
-        )
-        self.steps_done += 1
-
-        if sample > eps_threshold:
+        if sample > self._current_epsilon:
             with torch.no_grad():
                 return self.policy_net(state).max(1).indices.view(1, 1)
         return torch.tensor(
@@ -243,6 +254,13 @@ class DQNTrainer:
 
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
+            self._current_epsilon = epsilon_for_episode(
+                episode_index,
+                constants.NUM_EPISODES,
+                constants.EPS_DECAY_FRACTION,
+                constants.EPS_START,
+                constants.EPS_END,
+            )
             observation, _info = self.env.reset()
             video_writer = None
             if constants.VISUALIZE_EPISODES:
@@ -323,10 +341,7 @@ class DQNTrainer:
                         steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
-                    eps = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
-                        -1.0 * self.steps_done / constants.EPS_DECAY
-                    )
-                    self.writer.add_scalar("episode/epsilon", eps, episode_index)
+                    self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
                     if episode_losses:
                         n = len(episode_losses)
                         self.writer.add_scalar(
