@@ -62,7 +62,7 @@ def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
 
 
 def get_state_from_observation(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
-    """Build state tuple from raw observation (for policy / benchmark)."""
+    """Build state tuple from grayscale observation (for policy / benchmark)."""
     if constants.STATE_MODE == "ram":
         raise ValueError("RAM state mode is not supported.")
     locations = get_location(observation)

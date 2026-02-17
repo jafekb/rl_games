@@ -74,6 +74,7 @@ def get_location(image: np.ndarray) -> dict:
 
 
 def main(images: list[Path]) -> None:
+    """Run location extraction on image files (BGR from disk). Live env gives grayscale."""
     for im_fn in images:
         image = cv2.imread(im_fn)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
