@@ -10,12 +10,15 @@ import logging
 import math
 import random
 from collections import deque, namedtuple
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import ale_py
 import gymnasium as gym
 import imageio.v2 as imageio
 import numpy as np
 import torch
+from git import Repo
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
@@ -24,6 +27,16 @@ from surround.conf import constants
 from surround.utils.video_extract_locations import get_location
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
+
+
+def _get_run_metadata() -> dict:
+    """Return dict with git_commit, git_branch, timestamp for run metadata."""
+    repo = Repo(".", search_parent_directories=True)
+    return {
+        "timestamp": datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "git_commit": repo.head.commit.hexsha,
+        "git_branch": repo.active_branch.name,
+    }
 
 
 def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
@@ -97,6 +110,7 @@ class DQNTrainer:
             raise FileExistsError(
                 f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
             )
+        self._run_metadata = _get_run_metadata()
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
         self.writer.add_custom_scalars(
@@ -193,7 +207,11 @@ class DQNTrainer:
         constants.DQN_CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
         ep = episode_index + 1
         torch.save(self.policy_net.state_dict(), constants.DQN_POLICY_NET_LATEST)
-        metadata = {"episode_index": episode_index, "episodes_completed": ep}
+        metadata = {
+            **self._run_metadata,
+            "episode_index": episode_index,
+            "episodes_completed": ep,
+        }
         constants.DQN_CHECKPOINT_METADATA.write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"
         )
