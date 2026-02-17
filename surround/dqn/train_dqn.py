@@ -247,7 +247,14 @@ class DQNTrainer:
             steps_survived=steps_survived,
             **meta,
         )
-        constants.DQN_CHECKPOINT_METADATA.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        json_meta = (
+            {**meta, "best_steps_survived": self.best_steps_survived}
+            if self.best_steps_survived > 0
+            else meta
+        )
+        constants.DQN_CHECKPOINT_METADATA.write_text(
+            json.dumps(json_meta, indent=2), encoding="utf-8"
+        )
         if ep % constants.DQN_CHECKPOINT_INTERVAL == 0:
             path = constants.DQN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
             save_checkpoint(
@@ -366,7 +373,6 @@ class DQNTrainer:
                             sum(episode_grad_norms) / n,
                             episode_index,
                         )
-                    self._save_checkpoint(episode_index, steps_survived=steps_survived)
                     if steps_survived > self.best_steps_survived:
                         self.best_steps_survived = steps_survived
                         save_checkpoint(
@@ -375,6 +381,7 @@ class DQNTrainer:
                             steps_survived=steps_survived,
                             **{**self._run_metadata, "episodes_completed": episode_index + 1},
                         )
+                    self._save_checkpoint(episode_index, steps_survived=steps_survived)
                     break
             if video_writer is not None:
                 video_writer.close()
