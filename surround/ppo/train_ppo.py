@@ -73,7 +73,8 @@ class PPO:
         self.epochs = epochs
         self.mse_loss = nn.MSELoss()
 
-    def update(self, memory: dict) -> None:
+    def update(self, memory: dict) -> dict[str, float]:
+        """Update policy from rollout memory. Returns dict of metrics for logging."""
         states = torch.tensor(np.array(memory["states"]), dtype=torch.float32, device=self.device)
         actions = torch.tensor(memory["actions"], device=self.device)
         old_log_probs = torch.stack(memory["log_probs"]).detach().to(self.device)
@@ -91,26 +92,54 @@ class PPO:
         returns_t = torch.tensor(returns, dtype=torch.float32, device=self.device)
         returns_t = (returns_t - returns_t.mean()) / (returns_t.std() + 1e-7)
 
+        with torch.no_grad():
+            _, state_values_0 = self.policy(states)
+            state_values_0 = state_values_0.squeeze()
+        advantages = returns_t - state_values_0
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
+
+        loss_accum = 0.0
+        entropy_accum = 0.0
+        ratio_mean_accum = 0.0
+        ratio_min_accum = 0.0
+        ratio_max_accum = 0.0
+
         for _ in range(self.epochs):
             dist, state_values = self.policy(states)
             state_values = state_values.squeeze()
             new_log_probs = dist.log_prob(actions)
             entropy = dist.entropy()
 
-            advantages = returns_t - state_values.detach()
             ratio = torch.exp(new_log_probs - old_log_probs)
             surr1 = ratio * advantages
             surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
 
             loss = (
-                -torch.min(surr1, surr2)
+                -torch.min(surr1, surr2).mean()
                 + 0.5 * self.mse_loss(state_values, returns_t)
-                - 0.01 * entropy.mean()
+                - constants.PPO_ENTROPY_COEF * entropy.mean()
             )
 
             self.optimizer.zero_grad()
-            loss.mean().backward()
+            loss.backward()
+            if constants.PPO_GRAD_CLIP > 0:
+                nn.utils.clip_grad_norm_(self.policy.parameters(), constants.PPO_GRAD_CLIP)
             self.optimizer.step()
+
+            loss_accum += loss.item()
+            entropy_accum += entropy.mean().item()
+            ratio_mean_accum += ratio.mean().item()
+            ratio_min_accum += ratio.min().item()
+            ratio_max_accum += ratio.max().item()
+
+        n = self.epochs
+        return {
+            "ppo/loss": loss_accum / n,
+            "ppo/entropy": entropy_accum / n,
+            "ppo/ratio_mean": ratio_mean_accum / n,
+            "ppo/ratio_min": ratio_min_accum / n,
+            "ppo/ratio_max": ratio_max_accum / n,
+        }
 
 
 class PPOTrainer:
@@ -130,6 +159,7 @@ class PPOTrainer:
             device=self.device,
         )
         self.best_steps_survived = 0
+        self._num_updates = 0
         self._run_metadata = _get_run_metadata()
 
         if constants.PPO_LOG_DIR.exists():
@@ -220,19 +250,24 @@ class PPOTrainer:
                 next_obs, reward, terminated, truncated, _ = self.env.step(action_id)
                 next_state = self._get_state(next_obs, action_id)
                 done = terminated or truncated or abs(reward) == 1
+                # Dense reward for surviving (match Q-learning) so policy doesn't only see ±1 at end
+                step_reward = reward + (constants.STEP_REWARD if not done else 0.0)
 
                 memory["states"].append(state.copy())
                 memory["actions"].append(action.item())
                 memory["log_probs"].append(log_prob.cpu())
-                memory["rewards"].append(reward)
+                memory["rewards"].append(step_reward)
                 memory["is_terminals"].append(done)
 
                 state = next_state
                 last_action = action_id
-                ep_reward += reward
+                ep_reward += reward  # raw env reward for logging
 
                 if timestep >= constants.PPO_UPDATE_TIMESTEP:
-                    self.agent.update(memory)
+                    metrics = self.agent.update(memory)
+                    for key, value in metrics.items():
+                        self.writer.add_scalar(key, value, self._num_updates)
+                    self._num_updates += 1
                     memory = {k: [] for k in memory}
                     timestep = 0
 

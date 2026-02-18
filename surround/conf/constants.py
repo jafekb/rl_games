@@ -57,13 +57,15 @@ DQN_CHECKPOINT_METADATA = DQN_CHECKPOINT_DIR / "metadata.json"
 
 # PPO (state-tuple input)
 STATE_TUPLE_DIM = 7
-PPO_LR = 3e-4
+PPO_LR = 1e-4
 PPO_GAMMA = 0.99
 PPO_EPS_CLIP = 0.2
-PPO_EPOCHS = 10
+PPO_EPOCHS = 5
+PPO_ENTROPY_COEF = 0.02
+PPO_GRAD_CLIP = 0.5
 PPO_UPDATE_TIMESTEP = 1000
 PPO_NUM_EPISODES = 400
-PPO_LOG_DIR = Path("runs/surround/ppo_init")
+PPO_LOG_DIR = Path("runs/surround/ppo_fix1")
 PPO_CHECKPOINT_DIR = PPO_LOG_DIR / "checkpoints"
 PPO_POLICY_LATEST = PPO_CHECKPOINT_DIR / "policy_latest.pt"
 PPO_POLICY_BEST = PPO_CHECKPOINT_DIR / "policy_best.pt"
