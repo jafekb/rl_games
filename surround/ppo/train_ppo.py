@@ -250,13 +250,11 @@ class PPOTrainer:
                 next_obs, reward, terminated, truncated, _ = self.env.step(action_id)
                 next_state = self._get_state(next_obs, action_id)
                 done = terminated or truncated or abs(reward) == 1
-                # Dense reward for surviving (match Q-learning) so policy doesn't only see ±1 at end
-                step_reward = reward + (constants.STEP_REWARD if not done else 0.0)
 
                 memory["states"].append(state.copy())
                 memory["actions"].append(action.item())
                 memory["log_probs"].append(log_prob.cpu())
-                memory["rewards"].append(step_reward)
+                memory["rewards"].append(reward)
                 memory["is_terminals"].append(done)
 
                 state = next_state
