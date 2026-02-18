@@ -63,9 +63,9 @@ PPO_EPS_CLIP = 0.2
 PPO_EPOCHS = 10
 PPO_ENTROPY_COEF = 0.02
 PPO_GRAD_CLIP = 0  # 0 = disabled; use 0.5 for extra stability if needed
-PPO_UPDATE_TIMESTEP = 1000
-PPO_NUM_EPISODES = 400
-PPO_LOG_DIR = Path("runs/surround/ppo_fix2")
+PPO_UPDATE_TIMESTEP = 2000
+PPO_NUM_EPISODES = 2000
+PPO_LOG_DIR = Path("runs/surround/ppo/rollout2000_2k_ep")
 PPO_CHECKPOINT_DIR = PPO_LOG_DIR / "checkpoints"
 PPO_POLICY_LATEST = PPO_CHECKPOINT_DIR / "policy_latest.pt"
 PPO_POLICY_BEST = PPO_CHECKPOINT_DIR / "policy_best.pt"
