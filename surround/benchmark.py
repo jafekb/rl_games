@@ -84,7 +84,7 @@ def main() -> None:
             q_table_episodes = analysis.get("episode_index")
         if constants.DQN_CHECKPOINT_METADATA.exists():
             dqn_meta = json.loads(constants.DQN_CHECKPOINT_METADATA.read_text(encoding="utf-8"))
-            dqn_episodes = dqn_meta.get("episode_index")
+            dqn_episodes = dqn_meta.get("episodes_completed")
         for policy_name, policy in POLICIES.items():
             video_writer = None
             if RECORD_VIDEO:

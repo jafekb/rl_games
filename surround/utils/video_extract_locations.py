@@ -14,7 +14,7 @@ X_SIZE = 9
 Y_SIZE = 4
 
 # Crop bounds for the game region
-GAME_ROW_SLICE = slice(35, 197)
+GAME_ROW_SLICE = slice(35, 198)
 GAME_COL_SLICE = slice(4, 156)
 
 VISUALIZE = False
@@ -34,25 +34,33 @@ def mask_to_grid_locations(mask: np.ndarray) -> Set[tuple[int, int]]:
     return locations
 
 
+# Grayscale intensity ranges for ego/opponent/walls/(background)
+EGO_GRAY = 179
+OPP_GRAY = 110
+WALLS_GRAY = 149
+BACKGROUND_GRAY = 104
+
+
 def get_location(image: np.ndarray) -> dict:
     """
-    Extracts the locations of the ego, opponent, and walls from an image.
+    Extracts the locations of the ego, opponent, and walls from a grayscale image.
 
     Args:
-        image: The input game image in BGR format.
+        image: Grayscale game image (H, W).
 
     Returns:
         A dictionary containing the locations of the ego, opponent, and walls.
     """
+    assert image.ndim == 2, "Image must be grayscale (H, W)."
     locations = {
         "ego": None,
         "opp": None,
         "walls": set(),
     }
-    game = image[GAME_ROW_SLICE, GAME_COL_SLICE, :]
-    ego = cv2.inRange(game, (90, 192, 180), (100, 197, 185))
-    opponent = cv2.inRange(game, (70, 70, 195), (75, 75, 205))
-    walls = cv2.inRange(game, (190, 100, 210), (200, 110, 220))
+    game = image[GAME_ROW_SLICE, GAME_COL_SLICE]
+    ego = (game == EGO_GRAY).astype(np.uint8) * 255
+    opponent = (game == OPP_GRAY).astype(np.uint8) * 255
+    walls = (game == WALLS_GRAY).astype(np.uint8) * 255
     x, y = np.where(ego)
     if x.size > 0 and y.size > 0:
         locations["ego"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
@@ -60,39 +68,35 @@ def get_location(image: np.ndarray) -> dict:
     if x.size > 0 and y.size > 0:
         locations["opp"] = (int(x.min() // X_SIZE), int(y.min() // Y_SIZE))
     locations["walls"] = mask_to_grid_locations(walls)
-
     if VISUALIZE:
         cv2.imwrite(EXTRACT_DIR / "1_orig.png", image)
         cv2.imwrite(EXTRACT_DIR / "2_game.png", game)
         cv2.imwrite(EXTRACT_DIR / "3_ego.png", ego)
         cv2.imwrite(EXTRACT_DIR / "4_opponent.png", opponent)
         cv2.imwrite(EXTRACT_DIR / "5_walls.png", walls)
-
     return locations
 
 
 def observation_to_class_map(observation: np.ndarray) -> np.ndarray:
     """
-    Convert an RGB observation to a single (H, W) array with 4 pixel classes.
+    Convert a grayscale observation to a single (H, W) array with 4 pixel classes.
 
-    Uses the same game crop and BGR inRange logic as get_location. Each pixel is
-    assigned one of: 0=empty, 1=wall, 2=opponent, 3=ego (priority: ego > opponent > wall > empty).
+    Uses the same game crop and grayscale intensity constants as get_location.
+    Each pixel is assigned one of: 0=empty, 1=wall, 2=opponent, 3=ego
+    (priority: ego > opponent > wall > empty).
 
     Args:
-        observation: RGB image from the env, shape (height, width, 3).
+        observation: Grayscale image from the env, shape (height, width).
 
     Returns:
         (H, W) array, dtype uint8, values in {0, 1, 2, 3}.
     """
-    frame = cv2.cvtColor(observation, cv2.COLOR_RGB2BGR)
-    game = frame[GAME_ROW_SLICE, GAME_COL_SLICE, :]
-    walls = cv2.inRange(game, (190, 100, 210), (200, 110, 220))
-    opponent = cv2.inRange(game, (70, 70, 195), (75, 75, 205))
-    ego = cv2.inRange(game, (90, 192, 180), (100, 197, 185))
-    out = np.zeros(game.shape[:2], dtype=np.uint8)
-    out[walls.astype(bool)] = 1
-    out[opponent.astype(bool)] = 2
-    out[ego.astype(bool)] = 3
+    assert observation.ndim == 2, "Observation must be grayscale (H, W)."
+    game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
+    out = np.zeros(game.shape, dtype=np.uint8)
+    out[game == WALLS_GRAY] = 1
+    out[game == OPP_GRAY] = 2
+    out[game == EGO_GRAY] = 3
     return out
 
 
@@ -124,9 +128,12 @@ def observation_to_onehot_80x80(
 
 
 def main(images: list[Path]) -> None:
+    """Run location extraction on image files.
+    Converts BGR from disk to grayscale for get_location."""
     for im_fn in images:
         image = cv2.imread(im_fn)
-        locs = get_location(image)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        locs = get_location(gray)
         print(im_fn.stem, locs)
 
     print("Done!")

@@ -9,29 +9,92 @@ import json
 import logging
 import math
 import random
+import time
 from collections import deque, namedtuple
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import ale_py
 import gymnasium as gym
 import imageio.v2 as imageio
 import numpy as np
 import torch
+from git import Repo
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.conf import constants
-from surround.utils.video_extract_locations import observation_to_onehot_80x80
+from surround.utils.checkpoint import load_checkpoint, save_checkpoint
+from surround.utils.video_extract_locations import get_location, observation_to_onehot_80x80
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
 
-def _conv_out_size(h: int, w: int, kernel_size: int = 5, stride: int = 2) -> tuple[int, int]:
-    h1 = (h - kernel_size) // stride + 1
-    w1 = (w - kernel_size) // stride + 1
-    h2 = (h1 - kernel_size) // stride + 1
-    w2 = (w1 - kernel_size) // stride + 1
-    return h2, w2
+def epsilon_for_episode(
+    episode_index: int,
+    num_episodes: int,
+    decay_fraction: float,
+    eps_start: float,
+    eps_end: float,
+) -> float:
+    """Epsilon for the given episode (episode-fraction-based decay).
+
+    Decay is exponential over the first decay_fraction of num_episodes,
+    so the schedule scales with run length. By the end of the decay window
+    epsilon is ~95% of the way from eps_start to eps_end.
+    """
+    decay_episodes = max(1, int(num_episodes * decay_fraction))
+    return eps_end + (eps_start - eps_end) * math.exp(-episode_index / (decay_episodes / 3))
+
+
+def _conv_out_size(
+    h: int, w: int, n_layers: int = 3, kernel_size: int = 5, stride: int = 2
+) -> tuple[int, int]:
+    for _ in range(n_layers):
+        h = (h - kernel_size) // stride + 1
+        w = (w - kernel_size) // stride + 1
+    return h, w
+
+
+def _get_run_metadata() -> dict:
+    """Return dict with git_commit, git_branch, timestamp for run metadata."""
+    repo = Repo(".", search_parent_directories=True)
+    return {
+        "timestamp": datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "git_commit": repo.head.commit.hexsha,
+        "git_branch": repo.active_branch.name,
+    }
+
+
+def get_state_tuple(locations: dict, last_action: int) -> tuple[int, ...]:
+    """Build state tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)."""
+    if locations["ego"] is None or locations["opp"] is None:
+        return (1, 1, 1, 1, 1, 1, last_action)
+    ego_row, ego_col = locations["ego"]
+    opp_row, opp_col = locations["opp"]
+    wall_set = locations["walls"]
+    collisions = (
+        wall_set | {(opp_row, opp_col)} if opp_row is not None and opp_col is not None else wall_set
+    )
+
+    d_up = 1 if (ego_row - 1, ego_col) in collisions or ego_row <= 0 else 0
+    d_right = 1 if (ego_row, ego_col + 1) in collisions or ego_col >= constants.GRID_COLS - 1 else 0
+    d_left = 1 if (ego_row, ego_col - 1) in collisions or ego_col <= 0 else 0
+    d_down = 1 if (ego_row + 1, ego_col) in collisions or ego_row >= constants.GRID_ROWS - 1 else 0
+
+    rel_x = 0 if opp_col < ego_col else (2 if opp_col > ego_col else 1)
+    rel_y = 0 if opp_row < ego_row else (2 if opp_row > ego_row else 1)
+
+    return (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action)
+
+
+def get_state_from_observation(observation: np.ndarray, last_action: int) -> tuple[int, ...]:
+    """Build state tuple from grayscale observation (for policy / benchmark)."""
+    if constants.STATE_MODE == "ram":
+        raise ValueError("RAM state mode is not supported.")
+    locations = get_location(observation)
+    return get_state_tuple(locations, last_action)
 
 
 class DQN(torch.nn.Module):
@@ -42,7 +105,7 @@ class DQN(torch.nn.Module):
         h = constants.DQN_PREPROCESS_HEIGHT
         w = constants.DQN_PREPROCESS_WIDTH
         in_channels = constants.DQN_FRAME_STACK * 3  # 12
-        h_out, w_out = _conv_out_size(h, w)
+        h_out, w_out = _conv_out_size(h, w, n_layers=2)
         self.conv1 = torch.nn.Conv2d(in_channels, 16, kernel_size=5, stride=2)
         self.conv2 = torch.nn.Conv2d(16, 32, kernel_size=5, stride=2)
         self.flat_size = 32 * h_out * w_out
@@ -65,7 +128,7 @@ class DQNTrainer:
         gym.register_envs(ale_py)
         self.env = gym.make(
             "ALE/Surround-v5",
-            obs_type="rgb",
+            obs_type="grayscale",
             full_action_space=False,
             difficulty=constants.DIFFICULTY,
             mode=constants.MODE,
@@ -82,9 +145,13 @@ class DQNTrainer:
         self._frame_buffer: deque = deque(maxlen=constants.DQN_FRAME_STACK)
         self.steps_done = 0
         self.episode_durations: list[int] = []
-        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
+        self.best_steps_survived = 0
         if constants.DQN_LOG_DIR.exists():
-            raise FileExistsError(f"Log directory {constants.DQN_LOG_DIR} already exists.")
+            raise FileExistsError(
+                f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
+            )
+        self._run_metadata = _get_run_metadata()
+        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
         self.writer.add_custom_scalars(
             {
@@ -102,7 +169,7 @@ class DQNTrainer:
         )
 
     def _preprocess_observation(self, observation: np.ndarray) -> np.ndarray:
-        """Convert RGB observation to one-hot (H, W, 3) uint8, 80x80."""
+        """Convert observation to one-hot (H, W, 3) uint8, 80x80."""
         return observation_to_onehot_80x80(
             observation,
             size=(constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH),
@@ -138,12 +205,7 @@ class DQNTrainer:
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
-        eps_threshold = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
-            -1.0 * self.steps_done / constants.EPS_DECAY
-        )
-        self.steps_done += 1
-
-        if sample > eps_threshold:
+        if sample > self._current_epsilon:
             with torch.no_grad():
                 return self.policy_net(state).max(1).indices.view(1, 1)
         return torch.tensor(
@@ -203,27 +265,60 @@ class DQNTrainer:
             target[key] = policy[key] * constants.TAU + target[key] * (1 - constants.TAU)
         self.target_net.load_state_dict(target)
 
-    def _save_checkpoint(self, episode_index: int) -> None:
-        constants.DQN_CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    def _save_checkpoint(self, episode_index: int, steps_survived: int | None = None) -> None:
         ep = episode_index + 1
-        torch.save(self.policy_net.state_dict(), constants.DQN_POLICY_NET_LATEST)
-        metadata = {"episode_index": episode_index, "episodes_completed": ep}
+        meta = {**self._run_metadata, "episodes_completed": ep}
+        save_checkpoint(
+            constants.DQN_POLICY_NET_LATEST,
+            self.policy_net.state_dict(),
+            steps_survived=steps_survived,
+            **meta,
+        )
+        json_meta = (
+            {**meta, "best_steps_survived": self.best_steps_survived}
+            if self.best_steps_survived > 0
+            else meta
+        )
         constants.DQN_CHECKPOINT_METADATA.write_text(
-            json.dumps(metadata, indent=2), encoding="utf-8"
+            json.dumps(json_meta, indent=2), encoding="utf-8"
         )
         if ep % constants.DQN_CHECKPOINT_INTERVAL == 0:
             path = constants.DQN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
-            torch.save(self.policy_net.state_dict(), path)
+            save_checkpoint(
+                path, self.policy_net.state_dict(), steps_survived=steps_survived, **meta
+            )
 
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
+            self._current_epsilon = epsilon_for_episode(
+                episode_index,
+                constants.NUM_EPISODES,
+                constants.EPS_DECAY_FRACTION,
+                constants.EPS_START,
+                constants.EPS_END,
+            )
             observation, _info = self.env.reset()
+            video_writer = None
+            if constants.VISUALIZE_EPISODES:
+                observation = observation.copy()
+                episodes_dir = constants.DQN_LOG_DIR / "episodes"
+                episodes_dir.mkdir(parents=True, exist_ok=True)
+                video_path = episodes_dir / f"episode_{episode_index:04d}.mp4"
+                video_writer = imageio.get_writer(
+                    str(video_path),
+                    fps=constants.DQN_EPISODE_VIDEO_FPS,
+                    codec="libx264",
+                    quality=8,
+                    macro_block_size=1,
+                )
+                video_writer.append_data(observation)
             first_frame = self._preprocess_observation(observation)
             self._frame_buffer.clear()
             for _ in range(constants.DQN_FRAME_STACK):
                 self._frame_buffer.append(first_frame.copy())
             state = self._observation_to_tensor(self._stacked_state())
             terminal_reward = 0.0
+            episode_start_time = time.perf_counter()
             episode_losses: list[float] = []
             episode_td_errors: list[float] = []
             episode_q_means: list[float] = []
@@ -233,8 +328,12 @@ class DQNTrainer:
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = self.env.step(action_id)
+                if video_writer is not None:
+                    observation = observation.copy()
+                    video_writer.append_data(observation)
                 reward_t = torch.tensor([reward], device=self.device)
-                done = terminated or truncated
+                # Only train for 1 game, not the whole 10-point match.
+                done = terminated or truncated or abs(reward) == 1
 
                 if terminated:
                     next_state = None
@@ -257,7 +356,11 @@ class DQNTrainer:
                     terminal_reward = float(reward)
                     steps_survived = t + 1
                     self.episode_durations.append(steps_survived)
-
+                    elapsed = time.perf_counter() - episode_start_time
+                    steps_per_second = steps_survived / elapsed if elapsed > 0 else 0.0
+                    self.writer.add_scalar(
+                        "episode/steps_per_second", steps_per_second, episode_index
+                    )
                     self.writer.add_scalar("episode/steps_survived", steps_survived, episode_index)
                     self.writer.add_scalar(
                         "episode/terminal_reward", terminal_reward, episode_index
@@ -277,10 +380,7 @@ class DQNTrainer:
                         steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
-                    eps = constants.EPS_END + (constants.EPS_START - constants.EPS_END) * math.exp(
-                        -1.0 * self.steps_done / constants.EPS_DECAY
-                    )
-                    self.writer.add_scalar("episode/epsilon", eps, episode_index)
+                    self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
                     if episode_losses:
                         n = len(episode_losses)
                         self.writer.add_scalar(
@@ -305,8 +405,18 @@ class DQNTrainer:
                         )
                     if constants.VISUALIZE_DQN:
                         self.visualize()
-                    self._save_checkpoint(episode_index)
+                    if steps_survived > self.best_steps_survived:
+                        self.best_steps_survived = steps_survived
+                        save_checkpoint(
+                            constants.DQN_POLICY_NET_BEST,
+                            self.policy_net.state_dict(),
+                            steps_survived=steps_survived,
+                            **{**self._run_metadata, "episodes_completed": episode_index + 1},
+                        )
+                    self._save_checkpoint(episode_index, steps_survived=steps_survived)
                     break
+            if video_writer is not None:
+                video_writer.close()
         self.writer.close()
         print("Training complete!")
 
@@ -324,13 +434,8 @@ def _load_policy_net() -> DQN:
                 f"DQN checkpoint not found: {constants.DQN_POLICY_NET_LATEST}. Run training first."
             )
         _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
-        _POLICY_NET_CACHE.load_state_dict(
-            torch.load(
-                constants.DQN_POLICY_NET_LATEST,
-                map_location=_DEVICE,
-                weights_only=True,
-            )
-        )
+        state_dict, _ = load_checkpoint(constants.DQN_POLICY_NET_LATEST, map_location=_DEVICE)
+        _POLICY_NET_CACHE.load_state_dict(state_dict)
         _POLICY_NET_CACHE.eval()
     return _POLICY_NET_CACHE
 
