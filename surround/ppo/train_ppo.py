@@ -160,6 +160,7 @@ class PPOTrainer:
         )
         self.best_steps_survived = 0
         self._num_updates = 0
+        self._total_steps = 0
         self._run_metadata = _get_run_metadata()
 
         if constants.PPO_LOG_DIR.exists():
@@ -197,7 +198,11 @@ class PPOTrainer:
 
     def _save_checkpoint(self, episode_index: int, steps_survived: int | None = None) -> None:
         ep = episode_index + 1
-        meta = {**self._run_metadata, "episodes_completed": ep}
+        meta = {
+            **self._run_metadata,
+            "episodes_completed": ep,
+            "total_steps": self._total_steps,
+        }
         save_checkpoint(
             constants.PPO_POLICY_LATEST,
             self.agent.policy.state_dict(),
@@ -240,6 +245,7 @@ class PPOTrainer:
 
             for t in trange(constants.MAX_CYCLES, leave=False):
                 timestep += 1
+                self._total_steps += 1
                 state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
                 with torch.no_grad():
                     dist, _ = self.agent.policy(state_tensor)
