@@ -5,6 +5,8 @@ from pathlib import Path
 # Game / simulation
 GRID_ROWS = 18
 GRID_COLS = 38
+GAME_ROW_SLICE = slice(35, 198)
+GAME_COL_SLICE = slice(4, 156)
 EMPTY_CELL = 0
 WALL_CELL = 1
 EGO_CELL = 2
@@ -46,8 +48,8 @@ TAU = 0.005
 LR = 3e-4
 MEMORY_CAPACITY = 10_000
 NUM_EPISODES = 10_000
-DQN_GAME_HEIGHT = 162  # game crop rows (35:197)
-DQN_GAME_WIDTH = 152  # game crop cols (4:156)
+DQN_GAME_HEIGHT = GAME_ROW_SLICE.stop - GAME_ROW_SLICE.start
+DQN_GAME_WIDTH = GAME_COL_SLICE.stop - GAME_COL_SLICE.start
 N_ACTIONS = 4  # Surround without NOOP
 VISUALIZE_DQN = True
 DQN_LOG_DIR = Path("runs/surround_dqn_exp10")

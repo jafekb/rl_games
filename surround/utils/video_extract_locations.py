@@ -13,10 +13,6 @@ EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
 X_SIZE = 9
 Y_SIZE = 4
 
-# Crop bounds for the game region
-GAME_ROW_SLICE = slice(35, 198)
-GAME_COL_SLICE = slice(4, 156)
-
 VISUALIZE = False
 
 
@@ -57,7 +53,7 @@ def get_location(image: np.ndarray) -> dict:
         "opp": None,
         "walls": set(),
     }
-    game = image[GAME_ROW_SLICE, GAME_COL_SLICE]
+    game = image[constants.GAME_ROW_SLICE, constants.GAME_COL_SLICE]
     ego = (game == EGO_GRAY).astype(np.uint8) * 255
     opponent = (game == OPP_GRAY).astype(np.uint8) * 255
     walls = (game == WALLS_GRAY).astype(np.uint8) * 255
@@ -92,7 +88,7 @@ def observation_to_class_map(observation: np.ndarray) -> np.ndarray:
         (H, W) array, dtype uint8, values in {0, 1, 2, 3}.
     """
     assert observation.ndim == 2, "Observation must be grayscale (H, W)."
-    game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
+    game = observation[constants.GAME_ROW_SLICE, constants.GAME_COL_SLICE]
     out = np.zeros(game.shape, dtype=np.uint8)
     out[game == WALLS_GRAY] = 1
     out[game == OPP_GRAY] = 2
