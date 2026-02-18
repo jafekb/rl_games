@@ -97,6 +97,44 @@ def get_state_from_observation(observation: np.ndarray, last_action: int) -> tup
     return get_state_tuple(locations, last_action)
 
 
+def _step_until_new_frame(
+    env: gym.Env,
+    last_pos: dict,
+    action_id: int,
+    max_substeps: int = 20,
+) -> tuple[np.ndarray, float, bool, bool, dict]:
+    """Step env until ego or opponent position changes (or episode ends).
+
+    Ensures consecutive frames are distinct and useful by only accepting
+    a new frame when the game state (ego/opp positions) has actually changed.
+    """
+    total_reward = 0.0
+    observation, reward, terminated, truncated, info = None, 0.0, False, False, {}
+    locs = {"ego": None, "opp": None}
+
+    for _ in range(max_substeps):
+        observation, reward, terminated, truncated, info = env.step(action_id)
+        locs = get_location(observation)
+        if locs["ego"] is None or locs["opp"] is None:
+            total_reward += reward
+            continue
+        total_reward += reward
+        done = terminated or truncated or abs(reward) == 1
+        if done:
+            break
+        if (
+            last_pos.get("ego") is None
+            or last_pos.get("opp") is None
+            or locs["ego"] != last_pos["ego"]
+            or locs["opp"] != last_pos["opp"]
+        ):
+            break
+
+    info = dict(info)
+    info["location"] = {"ego": locs["ego"], "opp": locs["opp"]}
+    return observation.copy(), total_reward, terminated, truncated, info
+
+
 class DQN(torch.nn.Module):
     """CNN that takes stacked one-hot (4 frames x 3 channels), 80x80, and outputs Q-values."""
 
@@ -200,8 +238,7 @@ class DQNTrainer:
             return
         out_dir = (log_dir or constants.DQN_LOG_DIR) / "images"
         out_dir.mkdir(parents=True, exist_ok=True)
-        # buffer[0]=oldest, buffer[3]=newest -> t-3, t-2, t-1, t0
-        names = ["t-3.png", "t-2.png", "t-1.png", "t0.png"]
+        names = ["t-3.png", "t-2.png", "t-1.png", "t-0.png"]
         for i, name in enumerate(names):
             frame = self._frame_buffer[i]  # (H, W, 3) one-hot 0/1
             rgb = (frame * 255).astype(np.uint8)  # ego=R, opponent=G, wall=B
@@ -302,6 +339,10 @@ class DQNTrainer:
                 constants.EPS_END,
             )
             observation, _info = self.env.reset()
+            last_pos = {
+                "ego": get_location(observation)["ego"],
+                "opp": get_location(observation)["opp"],
+            }
             video_writer = None
             if constants.VISUALIZE_EPISODES:
                 observation = observation.copy()
@@ -331,7 +372,10 @@ class DQNTrainer:
             for t in trange(constants.MAX_CYCLES, leave=False):
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
-                observation, reward, terminated, truncated, _info = self.env.step(action_id)
+                observation, reward, terminated, truncated, _info = _step_until_new_frame(
+                    self.env, last_pos, action_id
+                )
+                last_pos = _info["location"]
                 if video_writer is not None:
                     observation = observation.copy()
                     video_writer.append_data(observation)
