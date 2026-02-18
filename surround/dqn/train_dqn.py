@@ -26,6 +26,7 @@ from tqdm import trange
 
 from surround.conf import constants
 from surround.utils.checkpoint import load_checkpoint, save_checkpoint
+from surround.utils.env_state import is_done_train_episode
 from surround.utils.video_extract_locations import get_location, observation_to_onehot_80x80
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -119,7 +120,7 @@ def _step_until_new_frame(
             total_reward += reward
             continue
         total_reward += reward
-        done = terminated or truncated or abs(reward) == 1
+        done = is_done_train_episode(terminated, truncated, reward)
         if done:
             break
         if (
@@ -381,7 +382,7 @@ class DQNTrainer:
                     video_writer.append_data(observation)
                 reward_t = torch.tensor([reward], device=self.device)
                 # Only train for 1 game, not the whole 10-point match.
-                done = terminated or truncated or abs(reward) == 1
+                done = is_done_train_episode(terminated, truncated, reward)
 
                 if terminated:
                     next_state = None

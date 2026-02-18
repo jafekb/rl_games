@@ -10,6 +10,13 @@ from surround import constants
 from surround.utils.video_extract_locations import get_location
 
 
+def is_done_train_episode(terminated: bool, truncated: bool, reward: float) -> bool:
+    """
+    Only train for 1 game, not the whole 10-point match.
+    True if the episode is over (env ended or single game win/loss, reward ±1)."""
+    return terminated or truncated or abs(reward) == 1
+
+
 def total_possible_states(state_mode: str) -> int:
     if state_mode == "state_tuple":
         return 576  # 2*2*2*2*3*3*4

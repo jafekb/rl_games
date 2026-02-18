@@ -10,6 +10,7 @@ from surround.actions import ACTION_WORD_TO_ID
 from surround.utils.callbacks import TensorboardCallback, TrainingCallback
 from surround.utils.env_state import (
     build_state_from_observation,
+    is_done_train_episode,
     make_env,
     total_possible_states,
 )
@@ -88,7 +89,7 @@ class QLearning:
         ):
             action_id, action_index, is_random = self._get_action(state, epsilon)
             observation, reward, terminated, truncated, _info = self.env.step(action_id)
-            if not (terminated or truncated):
+            if not is_done_train_episode(terminated, truncated, reward):
                 reward += constants.STEP_REWARD
 
             next_state = self._get_state(observation, action_id)
@@ -108,10 +109,10 @@ class QLearning:
             else:
                 self.greedy_steps += 1
 
-            if terminated or truncated:
+            if is_done_train_episode(terminated, truncated, reward):
                 terminal_reward = float(reward)
                 break
-        if not (terminated or truncated):
+        if not is_done_train_episode(terminated, truncated, reward):
             terminal_reward = 0.0
         self.episode_lengths.append(episode_steps)
         self.episode_returns.append(episode_return)
