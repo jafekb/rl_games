@@ -34,6 +34,8 @@ LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
 DQN_FRAME_SKIP = 4
+# Input type: "state_tuple" (7-tuple vector -> MLP) or "grayscale" (full image -> CNN)
+DQN_STATE_TYPE = "state_tuple"
 BATCH_SIZE = 128
 GAMMA_DQN = 0.99
 EPS_START = 0.9
