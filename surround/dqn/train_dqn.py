@@ -25,7 +25,11 @@ from tqdm import trange
 
 from surround.conf import constants
 from surround.utils.checkpoint import load_checkpoint, save_checkpoint
-from surround.utils.video_extract_locations import get_location, observation_to_class_map
+from surround.utils.video_extract_locations import (
+    GAME_COL_SLICE,
+    GAME_ROW_SLICE,
+    get_location,
+)
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
@@ -96,8 +100,32 @@ def get_state_from_observation(observation: np.ndarray, last_action: int) -> tup
     return get_state_tuple(locations, last_action)
 
 
+def _make_dqn_net(n_actions: int, device: torch.device) -> torch.nn.Module:
+    """Return policy/target net for current DQN_STATE_TYPE."""
+    if constants.DQN_STATE_TYPE == "state_tuple":
+        return DqnMlp(n_actions).to(device)
+    if constants.DQN_STATE_TYPE == "grayscale":
+        return DQN(n_actions).to(device)
+    raise ValueError(f"Unknown DQN_STATE_TYPE: {constants.DQN_STATE_TYPE}")
+
+
+class DqnMlp(torch.nn.Module):
+    """MLP that takes 7-tuple state (1, 7) and outputs Q-values for each action."""
+
+    def __init__(self, n_actions: int, hidden: int = 128):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(7, hidden)
+        self.fc2 = torch.nn.Linear(hidden, hidden)
+        self.fc3 = torch.nn.Linear(hidden, n_actions)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.nn.functional.relu(self.fc1(x))
+        x = torch.nn.functional.relu(self.fc2(x))
+        return self.fc3(x)
+
+
 class DQN(torch.nn.Module):
-    """CNN that takes 4-class game map (1, H, W) and outputs Q-values for each action."""
+    """CNN for (1, H, W) grayscale or 4-class map; outputs Q-values per action."""
 
     def __init__(self, n_actions: int):
         super().__init__()
@@ -136,13 +164,14 @@ class DQNTrainer:
             frameskip=constants.DQN_FRAME_SKIP,
         )
         self.n_actions = self.env.action_space.n - 1  # ignore NOOP
-        self.policy_net = DQN(self.n_actions).to(self.device)
-        self.target_net = DQN(self.n_actions).to(self.device)
+        self.state_type = constants.DQN_STATE_TYPE
+        self.policy_net = _make_dqn_net(self.n_actions, self.device)
+        self.target_net = _make_dqn_net(self.n_actions, self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.optimizer = torch.optim.AdamW(
             self.policy_net.parameters(), lr=constants.LR, amsgrad=True
         )
-        self.memory: deque = deque([], maxlen=constants.MEMORY_CAPACITY)
+        self.memory: deque = deque(maxlen=constants.MEMORY_CAPACITY)
         self.episode_durations: list[int] = []
         self.best_steps_survived = 0
         if constants.DQN_LOG_DIR.exists():
@@ -167,13 +196,38 @@ class DQNTrainer:
             }
         )
 
-    def _preprocess_observation(self, observation: np.ndarray) -> np.ndarray:
-        """Convert grayscale observation to 4-class map (H, W) uint8."""
-        return observation_to_class_map(observation)
+    def _preprocess_observation(
+        self, observation: np.ndarray, last_action: int = 1
+    ) -> np.ndarray | tuple[int, ...]:
+        """Preprocess observation for the current state type.
 
-    def _observation_to_tensor(self, class_map: np.ndarray) -> torch.Tensor:
-        """Convert (H, W) class map to (1, 1, H, W) float tensor."""
-        x = torch.from_numpy(class_map).to(torch.float32).to(self.device)
+        - state_tuple: returns 7-tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action).
+        - grayscale: returns (H, W) float array in [0, 1] (cropped and resized to DQN_GAME_*).
+        """
+        if self.state_type == "state_tuple":
+            return get_state_from_observation(observation, last_action)
+        # grayscale: crop game region and normalize
+        game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
+        if game.shape != (constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH):
+            # Resize to match CNN expected size (crop is 163x152, we use 162x152)
+            t = torch.from_numpy(game).to(torch.float32).unsqueeze(0).unsqueeze(0)
+            t = torch.nn.functional.interpolate(
+                t,
+                size=(constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH),
+                mode="bilinear",
+                align_corners=False,
+            )
+            game = t.squeeze(0).squeeze(0).numpy()
+        return (game.astype(np.float32) / 255.0).copy()
+
+    def _observation_to_tensor(self, preprocessed: np.ndarray | tuple[int, ...]) -> torch.Tensor:
+        """Convert preprocessed state to (1, ...) tensor for the net."""
+        if self.state_type == "state_tuple":
+            arr = np.array(preprocessed, dtype=np.float32)
+            x = torch.from_numpy(arr).to(self.device)
+            return x.unsqueeze(0)
+        # grayscale: (H, W) -> (1, 1, H, W)
+        x = torch.from_numpy(preprocessed).to(torch.float32).to(self.device)
         return x.unsqueeze(0).unsqueeze(0)
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
@@ -240,7 +294,11 @@ class DQNTrainer:
 
     def _save_checkpoint(self, episode_index: int, steps_survived: int | None = None) -> None:
         ep = episode_index + 1
-        meta = {**self._run_metadata, "episodes_completed": ep}
+        meta = {
+            **self._run_metadata,
+            "episodes_completed": ep,
+            "dqn_state_type": self.state_type,
+        }
         save_checkpoint(
             constants.DQN_POLICY_NET_LATEST,
             self.policy_net.state_dict(),
@@ -285,7 +343,11 @@ class DQNTrainer:
                     macro_block_size=1,
                 )
                 video_writer.append_data(observation)
-            state = self._observation_to_tensor(self._preprocess_observation(observation))
+            # For state_tuple we need last_action; use 1 as sentinel for first frame
+            last_action = 1
+            state = self._observation_to_tensor(
+                self._preprocess_observation(observation, last_action)
+            )
             terminal_reward = 0.0
             episode_start_time = time.perf_counter()
             episode_losses: list[float] = []
@@ -308,11 +370,12 @@ class DQNTrainer:
                     next_state = None
                 else:
                     next_state = self._observation_to_tensor(
-                        self._preprocess_observation(observation)
+                        self._preprocess_observation(observation, action_id)
                     )
 
                 self.memory.append(Transition(state, action, next_state, reward_t))
                 state = next_state
+                last_action = action_id
 
                 metrics = self._optimize_model()
                 if metrics is not None:
@@ -379,7 +442,11 @@ class DQNTrainer:
                             constants.DQN_POLICY_NET_BEST,
                             self.policy_net.state_dict(),
                             steps_survived=steps_survived,
-                            **{**self._run_metadata, "episodes_completed": episode_index + 1},
+                            **{
+                                **self._run_metadata,
+                                "episodes_completed": episode_index + 1,
+                                "dqn_state_type": self.state_type,
+                            },
                         )
                     self._save_checkpoint(episode_index, steps_survived=steps_survived)
                     break
@@ -390,19 +457,29 @@ class DQNTrainer:
 
 
 # Policy for benchmark: lazy-load policy net from latest checkpoint
-_POLICY_NET_CACHE: DQN | None = None
+_POLICY_NET_CACHE: DQN | DqnMlp | None = None
+_POLICY_NET_STATE_TYPE: str | None = None
 _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def _load_policy_net() -> DQN:
-    global _POLICY_NET_CACHE
+def _load_policy_net() -> torch.nn.Module:
+    global _POLICY_NET_CACHE, _POLICY_NET_STATE_TYPE
     if _POLICY_NET_CACHE is None:
         if not constants.DQN_POLICY_NET_LATEST.exists():
             raise FileNotFoundError(
                 f"DQN checkpoint not found: {constants.DQN_POLICY_NET_LATEST}. Run training first."
             )
-        _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
-        state_dict, _ = load_checkpoint(constants.DQN_POLICY_NET_LATEST, map_location=_DEVICE)
+        state_dict, metadata = load_checkpoint(
+            constants.DQN_POLICY_NET_LATEST, map_location=_DEVICE
+        )
+        state_type = metadata.get("dqn_state_type") or constants.DQN_STATE_TYPE
+        _POLICY_NET_STATE_TYPE = state_type
+        if state_type == "state_tuple":
+            _POLICY_NET_CACHE = DqnMlp(constants.N_ACTIONS).to(_DEVICE)
+        elif state_type == "grayscale":
+            _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
+        else:
+            raise ValueError(f"Unknown dqn_state_type in checkpoint: {state_type}")
         _POLICY_NET_CACHE.load_state_dict(state_dict)
         _POLICY_NET_CACHE.eval()
     return _POLICY_NET_CACHE
@@ -411,8 +488,24 @@ def _load_policy_net() -> DQN:
 def greedy_dqn_policy(action_space, observation, info, last_action):
     """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
     net = _load_policy_net()
-    class_map = observation_to_class_map(observation)
-    x = torch.from_numpy(class_map).to(torch.float32).to(_DEVICE).unsqueeze(0).unsqueeze(0)
+    state_type = _POLICY_NET_STATE_TYPE or constants.DQN_STATE_TYPE
+    if state_type == "state_tuple":
+        state_tuple = get_state_from_observation(observation, last_action)
+        x = torch.from_numpy(np.array(state_tuple, dtype=np.float32)).to(_DEVICE).unsqueeze(0)
+    else:
+        game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
+        if game.shape != (constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH):
+            t = torch.from_numpy(game).to(torch.float32).unsqueeze(0).unsqueeze(0)
+            t = torch.nn.functional.interpolate(
+                t,
+                size=(constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH),
+                mode="bilinear",
+                align_corners=False,
+            )
+            game = (t.squeeze(0).squeeze(0).numpy() / 255.0).astype(np.float32)
+        else:
+            game = game.astype(np.float32) / 255.0
+        x = torch.from_numpy(game).to(torch.float32).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     with torch.no_grad():
         action_index = int(net(x).max(1).indices.item())
     return action_index + 1  # env action 1..4
