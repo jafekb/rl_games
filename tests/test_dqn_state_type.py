@@ -66,6 +66,15 @@ def test_get_state_from_observation_returns_7_tuple():
     assert all(isinstance(x, int | np.integer) for x in state)
 
 
+def _fake_run_metadata():
+    """Stub for run metadata so tests don't need git (e.g. CI detached HEAD)."""
+    return {
+        "timestamp": "2020-01-01 00:00:00 PST",
+        "git_commit": "test",
+        "git_branch": "test",
+    }
+
+
 @pytest.mark.parametrize("state_type", ["state_tuple", "grayscale"])
 def test_trainer_one_step_per_state_type(state_type, monkeypatch, tmp_path):
     """Run one episode step for each DQN_STATE_TYPE (integration; needs ALE)."""
@@ -93,9 +102,10 @@ def test_trainer_one_step_per_state_type(state_type, monkeypatch, tmp_path):
     monkeypatch.setattr(constants, "MEMORY_CAPACITY", 500)
     monkeypatch.setattr(constants, "BATCH_SIZE", 32)
 
-    from surround.dqn.train_dqn import DQNTrainer
+    from surround.dqn import train_dqn
 
-    trainer = DQNTrainer()
+    monkeypatch.setattr(train_dqn, "_get_run_metadata", _fake_run_metadata)
+    trainer = train_dqn.DQNTrainer()
     obs, _ = trainer.env.reset()
     last_action = 1
     preprocessed = trainer._preprocess_observation(obs, last_action)
