@@ -24,12 +24,9 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.conf import constants
+from surround.conf.constants import GAME_COL_SLICE, GAME_ROW_SLICE
 from surround.utils.checkpoint import load_checkpoint, save_checkpoint
-from surround.utils.video_extract_locations import (
-    GAME_COL_SLICE,
-    GAME_ROW_SLICE,
-    get_location,
-)
+from surround.utils.video_extract_locations import get_location
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
@@ -206,18 +203,7 @@ class DQNTrainer:
         """
         if self.state_type == "state_tuple":
             return get_state_from_observation(observation, last_action)
-        # grayscale: crop game region and normalize
         game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
-        if game.shape != (constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH):
-            # Resize to match CNN expected size (crop is 163x152, we use 162x152)
-            t = torch.from_numpy(game).to(torch.float32).unsqueeze(0).unsqueeze(0)
-            t = torch.nn.functional.interpolate(
-                t,
-                size=(constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH),
-                mode="bilinear",
-                align_corners=False,
-            )
-            game = t.squeeze(0).squeeze(0).numpy()
         return (game.astype(np.float32) / 255.0).copy()
 
     def _observation_to_tensor(self, preprocessed: np.ndarray | tuple[int, ...]) -> torch.Tensor:
@@ -494,17 +480,7 @@ def greedy_dqn_policy(action_space, observation, info, last_action):
         x = torch.from_numpy(np.array(state_tuple, dtype=np.float32)).to(_DEVICE).unsqueeze(0)
     else:
         game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
-        if game.shape != (constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH):
-            t = torch.from_numpy(game).to(torch.float32).unsqueeze(0).unsqueeze(0)
-            t = torch.nn.functional.interpolate(
-                t,
-                size=(constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH),
-                mode="bilinear",
-                align_corners=False,
-            )
-            game = (t.squeeze(0).squeeze(0).numpy() / 255.0).astype(np.float32)
-        else:
-            game = game.astype(np.float32) / 255.0
+        game = game.astype(np.float32) / 255.0
         x = torch.from_numpy(game).to(torch.float32).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     with torch.no_grad():
         action_index = int(net(x).max(1).indices.item())
