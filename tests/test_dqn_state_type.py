@@ -31,6 +31,15 @@ def test_make_dqn_net_grayscale_returns_cnn(monkeypatch):
     assert next(net.parameters()).device == device
 
 
+def test_make_dqn_net_class_map_returns_cnn(monkeypatch):
+    """_make_dqn_net with DQN_STATE_TYPE=class_map returns DQN (CNN), same as exp11."""
+    monkeypatch.setattr(constants, "DQN_STATE_TYPE", "class_map")
+    device = torch.device("cpu")
+    net = _make_dqn_net(4, device)
+    assert isinstance(net, DQN)
+    assert next(net.parameters()).device == device
+
+
 def test_make_dqn_net_unknown_raises(monkeypatch):
     """_make_dqn_net with unknown DQN_STATE_TYPE raises ValueError."""
     monkeypatch.setattr(constants, "DQN_STATE_TYPE", "invalid")
@@ -75,7 +84,7 @@ def _fake_run_metadata():
     }
 
 
-@pytest.mark.parametrize("state_type", ["state_tuple", "grayscale"])
+@pytest.mark.parametrize("state_type", ["state_tuple", "grayscale", "class_map"])
 def test_trainer_one_step_per_state_type(state_type, monkeypatch, tmp_path):
     """Run one episode step for each DQN_STATE_TYPE (integration; needs ALE)."""
     try:

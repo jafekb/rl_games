@@ -26,7 +26,7 @@ from tqdm import trange
 from surround.conf import constants
 from surround.conf.constants import GAME_COL_SLICE, GAME_ROW_SLICE
 from surround.utils.checkpoint import load_checkpoint, save_checkpoint
-from surround.utils.video_extract_locations import get_location
+from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
@@ -101,7 +101,7 @@ def _make_dqn_net(n_actions: int, device: torch.device) -> torch.nn.Module:
     """Return policy/target net for current DQN_STATE_TYPE."""
     if constants.DQN_STATE_TYPE == "state_tuple":
         return DqnMlp(n_actions).to(device)
-    if constants.DQN_STATE_TYPE == "grayscale":
+    if constants.DQN_STATE_TYPE in ("grayscale", "class_map"):
         return DQN(n_actions).to(device)
     raise ValueError(f"Unknown DQN_STATE_TYPE: {constants.DQN_STATE_TYPE}")
 
@@ -199,10 +199,13 @@ class DQNTrainer:
         """Preprocess observation for the current state type.
 
         - state_tuple: returns 7-tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action).
-        - grayscale: returns (H, W) float array in [0, 1] (cropped and resized to DQN_GAME_*).
+        - grayscale: returns (H, W) float array in [0, 1] (cropped to DQN_GAME_*).
+        - class_map: returns (H, W) uint8 4-class map (0=empty, 1=wall, 2=opp, 3=ego).
         """
         if self.state_type == "state_tuple":
             return get_state_from_observation(observation, last_action)
+        if self.state_type == "class_map":
+            return observation_to_class_map(observation)
         game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
         return (game.astype(np.float32) / 255.0).copy()
 
@@ -212,8 +215,9 @@ class DQNTrainer:
             arr = np.array(preprocessed, dtype=np.float32)
             x = torch.from_numpy(arr).to(self.device)
             return x.unsqueeze(0)
-        # grayscale: (H, W) -> (1, 1, H, W)
-        x = torch.from_numpy(preprocessed).to(torch.float32).to(self.device)
+        # grayscale or class_map: (H, W) -> (1, 1, H, W)
+        arr = np.asarray(preprocessed, dtype=np.float32)
+        x = torch.from_numpy(arr).to(self.device)
         return x.unsqueeze(0).unsqueeze(0)
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
@@ -462,7 +466,7 @@ def _load_policy_net() -> torch.nn.Module:
         _POLICY_NET_STATE_TYPE = state_type
         if state_type == "state_tuple":
             _POLICY_NET_CACHE = DqnMlp(constants.N_ACTIONS).to(_DEVICE)
-        elif state_type == "grayscale":
+        elif state_type in ("grayscale", "class_map"):
             _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
         else:
             raise ValueError(f"Unknown dqn_state_type in checkpoint: {state_type}")
@@ -478,6 +482,9 @@ def greedy_dqn_policy(action_space, observation, info, last_action):
     if state_type == "state_tuple":
         state_tuple = get_state_from_observation(observation, last_action)
         x = torch.from_numpy(np.array(state_tuple, dtype=np.float32)).to(_DEVICE).unsqueeze(0)
+    elif state_type == "class_map":
+        class_map = observation_to_class_map(observation)
+        x = torch.from_numpy(class_map.astype(np.float32)).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     else:
         game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
         game = game.astype(np.float32) / 255.0
