@@ -115,8 +115,9 @@ def _fraction_to_match_step_decay(
 
 
 def test_epsilon_fraction_matches_step_decay_over_first_10k_steps():
-    """For constant steps per episode, we can pick EPS_DECAY_FRACTION so the episode-based
+    """For constant steps per episode, we can pick a fraction so the episode-based
     curve matches the step-based curve (e.g. EPS_DECAY=100_000) over the first 10k steps.
+    That fraction is 0.06 (not the 0.01 we use in production for TensorBoard matching).
     """
     eps_start = 0.9
     eps_end = 0.01
@@ -139,3 +140,18 @@ def test_epsilon_fraction_matches_step_decay_over_first_10k_steps():
             f"At step={step}, episode_index={episode_index}: "
             f"step_eps={eps_step} vs episode_eps={eps_episode}"
         )
+
+
+def test_epsilon_fraction_001_reaches_near_min_by_episode_1000():
+    """EPS_DECAY_FRACTION=0.01 is chosen so epsilon is ~0.01 by ~episode 1000, matching
+    the original exp11 TensorBoard curve (x-axis = episode index)."""
+    from surround.conf import constants
+
+    num_episodes = constants.NUM_EPISODES
+    fraction = constants.EPS_DECAY_FRACTION
+    eps_at_1000 = epsilon_for_episode(
+        1000, num_episodes, fraction, constants.EPS_START, constants.EPS_END
+    )
+    assert eps_at_1000 == pytest.approx(0.01, abs=0.01), (
+        f"Expected epsilon ~0.01 by episode 1000 for TensorBoard match; got {eps_at_1000}"
+    )
