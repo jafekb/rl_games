@@ -272,6 +272,7 @@ class DQNTrainer:
         state_batch = torch.cat(batch.state)
         action_batch = torch.cat(batch.action)
         reward_batch = torch.cat(batch.reward)
+        reward_batch = torch.clamp(reward_batch, -1.0, 1.0)  # DQN-style reward clipping
 
         state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
@@ -289,8 +290,9 @@ class DQNTrainer:
 
         self.optimizer.zero_grad()
         loss.backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), float("inf"))
-        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.policy_net.parameters(), constants.DQN_GRAD_CLIP_NORM
+        )
         self.optimizer.step()
 
         return {
