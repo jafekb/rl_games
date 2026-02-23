@@ -34,13 +34,17 @@ LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
 DQN_FRAME_SKIP = 4
-# Input type: "state_tuple" (7-tuple vector -> MLP) or "grayscale" (full image -> CNN)
-DQN_STATE_TYPE = "state_tuple"
+# Input type:
+#     - "state_tuple": 7-tuple -> MLP)
+#     - "grayscale": image -> CNN)
+#     - "class_map": 4-class map -> CNN, exp11)
+DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
 GAMMA_DQN = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-EPS_DECAY_FRACTION = 0.5
+# 0.01 so epsilon ~0.01 by ~ep 1000 (matches exp11 TB curve); 0.06 = step-based 100k@100steps/ep
+EPS_DECAY_FRACTION = 0.01
 TAU = 0.005
 LR = 3e-4
 MEMORY_CAPACITY = 10_000
@@ -50,7 +54,7 @@ GAME_COL_SLICE = slice(4, 156)
 DQN_GAME_HEIGHT = GAME_ROW_SLICE.stop - GAME_ROW_SLICE.start
 DQN_GAME_WIDTH = GAME_COL_SLICE.stop - GAME_COL_SLICE.start
 N_ACTIONS = 4
-DQN_LOG_DIR = Path("runs/surround/dqn_long_exp11")
+DQN_LOG_DIR = Path("runs/surround/dqn/exp11_3")
 DQN_EPISODE_VIDEO_FPS = 10
 VISUALIZE_EPISODES = False
 DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"
