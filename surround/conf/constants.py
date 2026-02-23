@@ -35,15 +35,14 @@ LOG_DIR = Path("runs/surround/ql_visits")
 # DQN
 DQN_FRAME_SKIP = 4
 # Input type:
-#     - "state_tuple": 7-tuple -> MLP)
-#     - "grayscale": image -> CNN)
-#     - "class_map": 4-class map -> CNN, exp11)
+#     - "state_tuple": 7-tuple -> MLP
+#     - "grayscale": image -> CNN
+#     - "class_map": 4-class map -> CNN, exp11
 DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
 GAMMA_DQN = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-# 0.01 so epsilon ~0.01 by ~ep 1000 (matches exp11 TB curve); 0.06 = step-based 100k@100steps/ep
 EPS_DECAY_FRACTION = 0.01
 TAU = 0.005
 LR = 3e-4
