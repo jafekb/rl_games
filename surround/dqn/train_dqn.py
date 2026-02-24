@@ -186,7 +186,6 @@ class DQNTrainer:
                         [
                             "episode/steps_survived_win",
                             "episode/steps_survived_loss",
-                            "episode/steps_survived_trunc",
                         ],
                     ]
                 }
@@ -396,11 +395,6 @@ class DQNTrainer:
                     self.writer.add_scalar(
                         "episode/steps_survived_loss",
                         steps_survived if terminal_reward < 0 else float("nan"),
-                        episode_index,
-                    )
-                    self.writer.add_scalar(
-                        "episode/steps_survived_trunc",
-                        steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
                     self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
