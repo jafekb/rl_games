@@ -169,6 +169,7 @@ class DQNTrainer:
             self.policy_net.parameters(), lr=constants.LR, amsgrad=True
         )
         self.memory: deque = deque(maxlen=constants.MEMORY_CAPACITY)
+        self.steps_done = 0
         self.episode_durations: list[int] = []
         self.best_steps_survived = 0
         if constants.DQN_LOG_DIR.exists():
@@ -222,7 +223,16 @@ class DQNTrainer:
 
     def _select_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
-        if sample > self._current_epsilon:
+        eps_decay = getattr(constants, "EPS_DECAY", None)
+        if eps_decay is not None:
+            eps_threshold = constants.EPS_END + (
+                constants.EPS_START - constants.EPS_END
+            ) * math.exp(-1.0 * self.steps_done / eps_decay)
+            self.steps_done += 1
+            eps_use = eps_threshold
+        else:
+            eps_use = self._current_epsilon
+        if sample > eps_use:
             with torch.no_grad():
                 return self.policy_net(state).max(1).indices.view(1, 1)
         return torch.tensor(
@@ -311,13 +321,14 @@ class DQNTrainer:
 
     def run(self) -> None:
         for episode_index in trange(constants.NUM_EPISODES):
-            self._current_epsilon = epsilon_for_episode(
-                episode_index,
-                constants.NUM_EPISODES,
-                constants.EPS_DECAY_FRACTION,
-                constants.EPS_START,
-                constants.EPS_END,
-            )
+            if getattr(constants, "EPS_DECAY", None) is None:
+                self._current_epsilon = epsilon_for_episode(
+                    episode_index,
+                    constants.NUM_EPISODES,
+                    constants.EPS_DECAY_FRACTION,
+                    constants.EPS_START,
+                    constants.EPS_END,
+                )
             observation, _info = self.env.reset()
             video_writer = None
             if constants.VISUALIZE_EPISODES:
@@ -403,7 +414,15 @@ class DQNTrainer:
                         steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
-                    self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
+                    if getattr(constants, "EPS_DECAY", None) is not None:
+                        eps_log = constants.EPS_END + (
+                            constants.EPS_START - constants.EPS_END
+                        ) * math.exp(-1.0 * self.steps_done / constants.EPS_DECAY)
+                        self.writer.add_scalar("episode/epsilon", eps_log, episode_index)
+                    else:
+                        self.writer.add_scalar(
+                            "episode/epsilon", self._current_epsilon, episode_index
+                        )
                     if episode_losses:
                         n = len(episode_losses)
                         self.writer.add_scalar(
