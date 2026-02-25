@@ -175,6 +175,7 @@ class DQNTrainer:
             raise FileExistsError(
                 f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
             )
+        print(f"Saving checkpoint and run information to {constants.DQN_LOG_DIR}")
         self._run_metadata = _get_run_metadata()
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
@@ -186,7 +187,6 @@ class DQNTrainer:
                         [
                             "episode/steps_survived_win",
                             "episode/steps_survived_loss",
-                            "episode/steps_survived_trunc",
                         ],
                     ]
                 }
@@ -396,11 +396,6 @@ class DQNTrainer:
                     self.writer.add_scalar(
                         "episode/steps_survived_loss",
                         steps_survived if terminal_reward < 0 else float("nan"),
-                        episode_index,
-                    )
-                    self.writer.add_scalar(
-                        "episode/steps_survived_trunc",
-                        steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
                     self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)

@@ -44,7 +44,6 @@ class TensorboardCallback(TrainingCallback):
                         [
                             "episode/steps_survived_win",
                             "episode/steps_survived_loss",
-                            "episode/steps_survived_trunc",
                         ],
                     ]
                 }
@@ -70,11 +69,6 @@ class TensorboardCallback(TrainingCallback):
         self._writer.add_scalar(
             "episode/steps_survived_loss",
             episode_steps if terminal_reward < 0 else np.nan,
-            episode_index,
-        )
-        self._writer.add_scalar(
-            "episode/steps_survived_trunc",
-            episode_steps if terminal_reward == 0 else np.nan,
             episode_index,
         )
         self._writer.add_scalar("episode/epsilon", epsilon, episode_index)
