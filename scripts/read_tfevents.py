@@ -44,11 +44,22 @@ def summarize(path: Path, *, compact: bool = False) -> dict[str, dict[str, float
 
 
 def main() -> None:
-    args = [a for a in sys.argv[1:] if a not in ("--compact", "-c")]
-    compact = len(args) < len(sys.argv) - 1
+    args = [a for a in sys.argv[1:] if a not in ("--compact", "-c", "--help", "-h")]
+    compact = "--compact" in sys.argv[1:] or "-c" in sys.argv[1:]
+    if "--help" in sys.argv[1:] or "-h" in sys.argv[1:]:
+        print(
+            "Usage: read_tfevents.py [--compact | -c] <path>",
+            "",
+            "  path    Directory containing TensorBoard event files (e.g. runs/surround/dqn/exp15)",
+            "  -c, --compact   One-line summary per tag (n, min, max, mean) instead of full dump",
+            sep="\n",
+            file=sys.stderr,
+        )
+        sys.exit(0)
     path = Path(args[0]) if args else Path()
     if not path.exists():
         print(f"File not found: {path}", file=sys.stderr)
+        print("Usage: read_tfevents.py [--compact | -c] <path>", file=sys.stderr)
         sys.exit(1)
 
     if compact:
