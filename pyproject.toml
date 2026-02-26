@@ -17,6 +17,7 @@ dependencies = [
     "numpy",
     "opencv-python>=4.8.0",
     "pygame>=2.6.1",
+    "tensorboard>=2.20.0",
     "tensorboardX",
     "torch>=2.0.0",
     "tqdm>=4.67.3",
