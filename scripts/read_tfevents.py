@@ -12,6 +12,7 @@ TAGS_WANTED = {
     "episode/steps_survived",
     "episode/mean_huber_loss",
     "episode/mean_td_error",
+    "episode/terminal_reward",
 }
 
 
