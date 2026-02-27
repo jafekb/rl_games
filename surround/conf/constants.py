@@ -52,8 +52,11 @@ GAME_ROW_SLICE = slice(35, 198)
 GAME_COL_SLICE = slice(4, 156)
 DQN_GAME_HEIGHT = GAME_ROW_SLICE.stop - GAME_ROW_SLICE.start
 DQN_GAME_WIDTH = GAME_COL_SLICE.stop - GAME_COL_SLICE.start
+# Downsample image inputs to this size (e.g. exp10-style 80x80)
+DQN_PREPROCESS_HEIGHT = 80
+DQN_PREPROCESS_WIDTH = 80
 N_ACTIONS = 4
-DQN_LOG_DIR = Path("runs/surround/dqn/exp11_3")
+DQN_LOG_DIR = Path("runs/surround/dqn/exp16")
 DQN_EPISODE_VIDEO_FPS = 10
 VISUALIZE_EPISODES = False
 DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"
