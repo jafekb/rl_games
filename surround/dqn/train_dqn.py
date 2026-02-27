@@ -352,9 +352,11 @@ class DQNTrainer:
                 if video_writer is not None:
                     observation = observation.copy()
                     video_writer.append_data(observation)
-                reward_t = torch.tensor([reward], device=self.device)
                 # Only train for 1 game, not the whole 10-point match.
                 done = terminated or truncated or abs(reward) == 1
+                if not done:
+                    reward += constants.DQN_STEP_REWARD
+                reward_t = torch.tensor([reward], device=self.device)
 
                 if terminated:
                     next_state = None
