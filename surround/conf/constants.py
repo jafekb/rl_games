@@ -37,8 +37,9 @@ DQN_FRAME_SKIP = 4
 # Input type:
 #     - "state_tuple": 7-tuple -> MLP
 #     - "grayscale": image -> CNN
-#     - "class_map": 4-class map -> CNN, exp11
+#     - "class_map": 4-class map -> CNN, exp11; with DQN_FRAME_STACK>1 uses 4-frame stack
 DQN_STATE_TYPE = "class_map"
+DQN_FRAME_STACK = 4  # number of consecutive class_map frames as input (current + 3 previous)
 BATCH_SIZE = 128
 GAMMA_DQN = 0.99
 EPS_START = 0.9
@@ -53,7 +54,7 @@ GAME_COL_SLICE = slice(4, 156)
 DQN_GAME_HEIGHT = GAME_ROW_SLICE.stop - GAME_ROW_SLICE.start
 DQN_GAME_WIDTH = GAME_COL_SLICE.stop - GAME_COL_SLICE.start
 N_ACTIONS = 4
-DQN_LOG_DIR = Path("runs/surround/dqn/exp11_3")
+DQN_LOG_DIR = Path("runs/surround/dqn/exp18")
 DQN_EPISODE_VIDEO_FPS = 10
 VISUALIZE_EPISODES = False
 DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"

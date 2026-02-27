@@ -102,7 +102,10 @@ def _make_dqn_net(n_actions: int, device: torch.device) -> torch.nn.Module:
     if constants.DQN_STATE_TYPE == "state_tuple":
         return DqnMlp(n_actions).to(device)
     if constants.DQN_STATE_TYPE in ("grayscale", "class_map"):
-        return DQN(n_actions).to(device)
+        in_channels = 1
+        if constants.DQN_STATE_TYPE == "class_map" and getattr(constants, "DQN_FRAME_STACK", 1) > 1:
+            in_channels = constants.DQN_FRAME_STACK
+        return DQN(n_actions, in_channels=in_channels).to(device)
     raise ValueError(f"Unknown DQN_STATE_TYPE: {constants.DQN_STATE_TYPE}")
 
 
@@ -122,13 +125,13 @@ class DqnMlp(torch.nn.Module):
 
 
 class DQN(torch.nn.Module):
-    """CNN for (1, H, W) grayscale or 4-class map; outputs Q-values per action."""
+    """CNN for (1, H, W) or (C, H, W) grayscale/class_map; C=1 single frame, C=4 stacked frames."""
 
-    def __init__(self, n_actions: int):
+    def __init__(self, n_actions: int, in_channels: int = 1):
         super().__init__()
         h, w = constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH
         h_out, w_out = _conv_out_size(h, w)
-        self.conv1 = torch.nn.Conv2d(1, 32, kernel_size=5, stride=2)
+        self.conv1 = torch.nn.Conv2d(in_channels, 32, kernel_size=5, stride=2)
         self.conv2 = torch.nn.Conv2d(32, 64, kernel_size=5, stride=2)
         self.conv3 = torch.nn.Conv2d(64, 128, kernel_size=5, stride=2)
         self.flat_size = 128 * h_out * w_out
@@ -171,6 +174,13 @@ class DQNTrainer:
         self.memory: deque = deque(maxlen=constants.MEMORY_CAPACITY)
         self.episode_durations: list[int] = []
         self.best_steps_survived = 0
+        self._use_class_map_frame_stack = (
+            self.state_type == "class_map" and getattr(constants, "DQN_FRAME_STACK", 1) > 1
+        )
+        if self._use_class_map_frame_stack:
+            self._frame_buffer: deque = deque(maxlen=constants.DQN_FRAME_STACK)
+        else:
+            self._frame_buffer = None
         if constants.DQN_LOG_DIR.exists():
             raise FileExistsError(
                 f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
@@ -215,8 +225,12 @@ class DQNTrainer:
             arr = np.array(preprocessed, dtype=np.float32)
             x = torch.from_numpy(arr).to(self.device)
             return x.unsqueeze(0)
-        # grayscale or class_map: (H, W) -> (1, 1, H, W)
         arr = np.asarray(preprocessed, dtype=np.float32)
+        if arr.ndim == 3:
+            # Stacked class_map (F, H, W) -> (1, F, H, W)
+            x = torch.from_numpy(arr).to(self.device)
+            return x.unsqueeze(0)
+        # Single frame grayscale or class_map: (H, W) -> (1, 1, H, W)
         x = torch.from_numpy(arr).to(self.device)
         return x.unsqueeze(0).unsqueeze(0)
 
@@ -288,6 +302,9 @@ class DQNTrainer:
             **self._run_metadata,
             "episodes_completed": ep,
             "dqn_state_type": self.state_type,
+            "dqn_frame_stack": (
+                constants.DQN_FRAME_STACK if self._use_class_map_frame_stack else 1
+            ),
         }
         save_checkpoint(
             constants.DQN_POLICY_NET_LATEST,
@@ -335,9 +352,18 @@ class DQNTrainer:
                 video_writer.append_data(observation)
             # For state_tuple we need last_action; use 1 as sentinel for first frame
             last_action = 1
-            state = self._observation_to_tensor(
-                self._preprocess_observation(observation, last_action)
-            )
+            if self._use_class_map_frame_stack:
+                first_frame = self._preprocess_observation(observation, last_action)
+                assert isinstance(first_frame, np.ndarray)
+                self._frame_buffer.clear()
+                for _ in range(constants.DQN_FRAME_STACK):
+                    self._frame_buffer.append(first_frame.copy())
+                stacked = np.stack(self._frame_buffer, axis=0)
+                state = self._observation_to_tensor(stacked)
+            else:
+                state = self._observation_to_tensor(
+                    self._preprocess_observation(observation, last_action)
+                )
             terminal_reward = 0.0
             episode_start_time = time.perf_counter()
             episode_losses: list[float] = []
@@ -359,9 +385,16 @@ class DQNTrainer:
                 if terminated:
                     next_state = None
                 else:
-                    next_state = self._observation_to_tensor(
-                        self._preprocess_observation(observation, action_id)
-                    )
+                    if self._use_class_map_frame_stack:
+                        next_frame = self._preprocess_observation(observation, action_id)
+                        assert isinstance(next_frame, np.ndarray)
+                        self._frame_buffer.append(next_frame.copy())
+                        next_stacked = np.stack(self._frame_buffer, axis=0)
+                        next_state = self._observation_to_tensor(next_stacked)
+                    else:
+                        next_state = self._observation_to_tensor(
+                            self._preprocess_observation(observation, action_id)
+                        )
 
                 self.memory.append(Transition(state, action, next_state, reward_t))
                 state = next_state
@@ -431,6 +464,11 @@ class DQNTrainer:
                                 **self._run_metadata,
                                 "episodes_completed": episode_index + 1,
                                 "dqn_state_type": self.state_type,
+                                "dqn_frame_stack": (
+                                    constants.DQN_FRAME_STACK
+                                    if self._use_class_map_frame_stack
+                                    else 1
+                                ),
                             },
                         )
                     self._save_checkpoint(episode_index, steps_survived=steps_survived)
@@ -444,11 +482,13 @@ class DQNTrainer:
 # Policy for benchmark: lazy-load policy net from latest checkpoint
 _POLICY_NET_CACHE: DQN | DqnMlp | None = None
 _POLICY_NET_STATE_TYPE: str | None = None
+_POLICY_FRAME_STACK: int = 1
+_policy_frame_buffer: deque | None = None
 _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def _load_policy_net() -> torch.nn.Module:
-    global _POLICY_NET_CACHE, _POLICY_NET_STATE_TYPE
+    global _POLICY_NET_CACHE, _POLICY_NET_STATE_TYPE, _POLICY_FRAME_STACK, _policy_frame_buffer
     if _POLICY_NET_CACHE is None:
         if not constants.DQN_POLICY_NET_LATEST.exists():
             raise FileNotFoundError(
@@ -459,10 +499,19 @@ def _load_policy_net() -> torch.nn.Module:
         )
         state_type = metadata.get("dqn_state_type") or constants.DQN_STATE_TYPE
         _POLICY_NET_STATE_TYPE = state_type
+        frame_stack = metadata.get("dqn_frame_stack", 1) or 1
+        _POLICY_FRAME_STACK = frame_stack
         if state_type == "state_tuple":
             _POLICY_NET_CACHE = DqnMlp(constants.N_ACTIONS).to(_DEVICE)
+            _policy_frame_buffer = None
         elif state_type in ("grayscale", "class_map"):
-            _POLICY_NET_CACHE = DQN(constants.N_ACTIONS).to(_DEVICE)
+            in_channels = frame_stack if (state_type == "class_map" and frame_stack > 1) else 1
+            _POLICY_NET_CACHE = DQN(constants.N_ACTIONS, in_channels=in_channels).to(_DEVICE)
+            _policy_frame_buffer = (
+                deque(maxlen=frame_stack)
+                if (state_type == "class_map" and frame_stack > 1)
+                else None
+            )
         else:
             raise ValueError(f"Unknown dqn_state_type in checkpoint: {state_type}")
         _POLICY_NET_CACHE.load_state_dict(state_dict)
@@ -470,8 +519,22 @@ def _load_policy_net() -> torch.nn.Module:
     return _POLICY_NET_CACHE
 
 
+def reset_dqn_policy_for_episode(observation: np.ndarray) -> None:
+    """Reset the frame buffer for frame-stacked class_map DQN. Call after env.reset() when using
+    DQN with DQN_FRAME_STACK > 1 so the policy sees a consistent 4-frame stack each episode."""
+    global _policy_frame_buffer
+    if _policy_frame_buffer is None:
+        return
+    frame = observation_to_class_map(observation)
+    _policy_frame_buffer.clear()
+    for _ in range(_POLICY_FRAME_STACK):
+        _policy_frame_buffer.append(frame.copy())
+
+
 def greedy_dqn_policy(action_space, observation, info, last_action):
-    """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
+    """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy).
+    For frame-stacked class_map (DQN_FRAME_STACK > 1), call
+    reset_dqn_policy_for_episode(observation) after each env.reset()."""
     net = _load_policy_net()
     state_type = _POLICY_NET_STATE_TYPE or constants.DQN_STATE_TYPE
     if state_type == "state_tuple":
@@ -479,7 +542,16 @@ def greedy_dqn_policy(action_space, observation, info, last_action):
         x = torch.from_numpy(np.array(state_tuple, dtype=np.float32)).to(_DEVICE).unsqueeze(0)
     elif state_type == "class_map":
         class_map = observation_to_class_map(observation)
-        x = torch.from_numpy(class_map.astype(np.float32)).to(_DEVICE).unsqueeze(0).unsqueeze(0)
+        if _policy_frame_buffer is not None:
+            if len(_policy_frame_buffer) == 0:
+                for _ in range(_POLICY_FRAME_STACK):
+                    _policy_frame_buffer.append(class_map.copy())
+            else:
+                _policy_frame_buffer.append(class_map.copy())
+            stacked = np.stack(_policy_frame_buffer, axis=0).astype(np.float32)
+            x = torch.from_numpy(stacked).to(_DEVICE).unsqueeze(0)
+        else:
+            x = torch.from_numpy(class_map.astype(np.float32)).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     else:
         game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
         game = game.astype(np.float32) / 255.0

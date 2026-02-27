@@ -12,7 +12,7 @@ if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from surround import constants
-from surround.dqn.train_dqn import greedy_dqn_policy
+from surround.dqn.train_dqn import greedy_dqn_policy, reset_dqn_policy_for_episode
 from surround.utils.env_state import make_env
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
@@ -35,6 +35,8 @@ POLICIES = {
 
 def run_episode(env, policy, seed, video_writer, episode_index: int):
     observation, info = env.reset(seed=seed)
+    if policy is greedy_dqn_policy:
+        reset_dqn_policy_for_episode(observation)
     total = 0.0
     last_action = 1
     for cycle_step in trange(
