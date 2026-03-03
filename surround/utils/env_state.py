@@ -10,6 +10,58 @@ from surround import constants
 from surround.utils.video_extract_locations import get_location
 
 
+def step_until_new_frame(
+    env: gym.Env,
+    last_pos: dict,
+    action_id: int,
+    max_substeps: int = 20,
+) -> tuple[np.ndarray, float, bool, bool, dict]:
+    """Step the env until ego or opponent position changes (or the episode ends).
+
+    Ensures consecutive frames stored in replay memory or rollout buffers are
+    distinct.  Without this, many consecutive transitions share the same board
+    state (the Atari runs faster than the game logic advances), producing
+    near-zero TD errors that waste replay capacity and slow learning.
+
+    Reward is accumulated across all substeps and returned as a single total.
+    The returned info dict contains a "location" key with the final ego/opp
+    positions so callers can update last_pos without a second get_location call.
+
+    Args:
+        env: The Gymnasium environment.
+        last_pos: Dict with "ego" and "opp" keys from the previous step.
+        action_id: Action to repeat (1..4).
+        max_substeps: Hard cap on repeated steps to avoid infinite loops.
+
+    Returns:
+        (observation, total_reward, terminated, truncated, info)
+    """
+    total_reward = 0.0
+    observation, reward, terminated, truncated, info = None, 0.0, False, False, {}
+    locs: dict = {"ego": None, "opp": None}
+
+    for _ in range(max_substeps):
+        observation, reward, terminated, truncated, info = env.step(action_id)
+        locs = get_location(observation)
+        total_reward += reward
+        if locs["ego"] is None or locs["opp"] is None:
+            continue
+        done = terminated or truncated or abs(reward) == 1
+        if done:
+            break
+        if (
+            last_pos.get("ego") is None
+            or last_pos.get("opp") is None
+            or locs["ego"] != last_pos["ego"]
+            or locs["opp"] != last_pos["opp"]
+        ):
+            break
+
+    info = dict(info)
+    info["location"] = {"ego": locs["ego"], "opp": locs["opp"]}
+    return observation.copy(), total_reward, terminated, truncated, info
+
+
 def total_possible_states(state_mode: str) -> int:
     if state_mode == "state_tuple":
         return 576  # 2*2*2*2*3*3*4

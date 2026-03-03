@@ -27,6 +27,7 @@ from tqdm import trange
 from surround.conf import constants
 from surround.conf.constants import GAME_COL_SLICE, GAME_ROW_SLICE
 from surround.utils.checkpoint import load_checkpoint, save_checkpoint
+from surround.utils.env_state import step_until_new_frame
 from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -337,6 +338,10 @@ class DQNTrainer:
                 constants.EPS_END,
             )
             observation, _info = self.env.reset()
+            last_pos = {
+                "ego": get_location(observation)["ego"],
+                "opp": get_location(observation)["opp"],
+            }
             video_writer = None
             if constants.VISUALIZE_EPISODES:
                 observation = observation.copy()
@@ -366,7 +371,10 @@ class DQNTrainer:
             for t in trange(constants.MAX_CYCLES, leave=False):
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
-                observation, reward, terminated, truncated, _info = self.env.step(action_id)
+                observation, reward, terminated, truncated, _info = step_until_new_frame(
+                    self.env, last_pos, action_id
+                )
+                last_pos = _info["location"]
                 if video_writer is not None:
                     observation = observation.copy()
                     video_writer.append_data(observation)

@@ -15,7 +15,8 @@ from tqdm import trange
 from surround.actions import ACTION_WORD_TO_ID
 from surround.conf import constants
 from surround.utils.checkpoint import save_checkpoint
-from surround.utils.env_state import build_state_from_observation, make_env
+from surround.utils.env_state import build_state_from_observation, make_env, step_until_new_frame
+from surround.utils.video_extract_locations import get_location
 
 
 def _get_run_metadata() -> dict:
@@ -239,6 +240,10 @@ class PPOTrainer:
         for episode_index in trange(constants.PPO_NUM_EPISODES):
             observation, _ = self.env.reset()
             last_action = ACTION_WORD_TO_ID["LEFT"]
+            last_pos = {
+                "ego": get_location(observation)["ego"],
+                "opp": get_location(observation)["opp"],
+            }
             state = self._get_state(observation, last_action)
             ep_reward = 0.0
             terminal_reward = 0.0
@@ -253,7 +258,10 @@ class PPOTrainer:
                     log_prob = dist.log_prob(action)
 
                 action_id = action.item() + 1
-                next_obs, reward, terminated, truncated, _ = self.env.step(action_id)
+                next_obs, reward, terminated, truncated, _info = step_until_new_frame(
+                    self.env, last_pos, action_id
+                )
+                last_pos = _info["location"]
                 next_state = self._get_state(next_obs, action_id)
                 done = terminated or truncated or abs(reward) == 1
 
