@@ -15,6 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import ale_py
+import cv2
 import gymnasium as gym
 import imageio.v2 as imageio
 import numpy as np
@@ -55,6 +56,17 @@ def _conv_out_size(
         h = (h - kernel_size) // stride + 1
         w = (w - kernel_size) // stride + 1
     return h, w
+
+
+def _resize_to_preprocess(arr: np.ndarray, *, is_class_map: bool) -> np.ndarray:
+    """Resize observation to DQN_PREPROCESS_HEIGHT x DQN_PREPROCESS_WIDTH."""
+    h, w = constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH
+    if is_class_map:
+        resized = cv2.resize(arr, (w, h), interpolation=cv2.INTER_NEAREST)
+        return resized
+    # grayscale float [0, 1]
+    resized = cv2.resize(arr, (w, h), interpolation=cv2.INTER_AREA)
+    return resized.astype(np.float32)
 
 
 def _get_run_metadata() -> dict:
@@ -122,11 +134,14 @@ class DqnMlp(torch.nn.Module):
 
 
 class DQN(torch.nn.Module):
-    """CNN for (1, H, W) grayscale or 4-class map; outputs Q-values per action."""
+    """CNN for (1, H, W) grayscale or 4-class map; outputs Q-values per action.
+
+    Input is always downsampled to DQN_PREPROCESS_HEIGHT x DQN_PREPROCESS_WIDTH (e.g. 80x80).
+    """
 
     def __init__(self, n_actions: int):
         super().__init__()
-        h, w = constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH
+        h, w = constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH
         h_out, w_out = _conv_out_size(h, w)
         self.conv1 = torch.nn.Conv2d(1, 32, kernel_size=5, stride=2)
         self.conv2 = torch.nn.Conv2d(32, 64, kernel_size=5, stride=2)
@@ -199,15 +214,18 @@ class DQNTrainer:
         """Preprocess observation for the current state type.
 
         - state_tuple: returns 7-tuple (d_up, d_right, d_left, d_down, rel_x, rel_y, last_action).
-        - grayscale: returns (H, W) float array in [0, 1] (cropped to DQN_GAME_*).
-        - class_map: returns (H, W) uint8 4-class map (0=empty, 1=wall, 2=opp, 3=ego).
+        - grayscale: returns (H, W) float array in [0, 1] (cropped to game, then resized to 80x80).
+        - class_map: returns (H, W) uint8 4-class map resized to 80x80
+          (0=empty, 1=wall, 2=opp, 3=ego).
         """
         if self.state_type == "state_tuple":
             return get_state_from_observation(observation, last_action)
         if self.state_type == "class_map":
-            return observation_to_class_map(observation)
+            class_map = observation_to_class_map(observation)
+            return _resize_to_preprocess(class_map, is_class_map=True)
         game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
-        return (game.astype(np.float32) / 255.0).copy()
+        game = (game.astype(np.float32) / 255.0).copy()
+        return _resize_to_preprocess(game, is_class_map=False)
 
     def _observation_to_tensor(self, preprocessed: np.ndarray | tuple[int, ...]) -> torch.Tensor:
         """Convert preprocessed state to (1, ...) tensor for the net."""
@@ -457,7 +475,9 @@ def _load_policy_net() -> torch.nn.Module:
         state_dict, metadata = load_checkpoint(
             constants.DQN_POLICY_NET_LATEST, map_location=_DEVICE
         )
-        state_type = metadata.get("dqn_state_type") or constants.DQN_STATE_TYPE
+        if "dqn_state_type" not in metadata:
+            raise ValueError("Checkpoint missing dqn_state_type; re-save from current trainer.")
+        state_type = metadata["dqn_state_type"]
         _POLICY_NET_STATE_TYPE = state_type
         if state_type == "state_tuple":
             _POLICY_NET_CACHE = DqnMlp(constants.N_ACTIONS).to(_DEVICE)
@@ -473,16 +493,18 @@ def _load_policy_net() -> torch.nn.Module:
 def greedy_dqn_policy(action_space, observation, info, last_action):
     """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
     net = _load_policy_net()
-    state_type = _POLICY_NET_STATE_TYPE or constants.DQN_STATE_TYPE
+    state_type = _POLICY_NET_STATE_TYPE
     if state_type == "state_tuple":
         state_tuple = get_state_from_observation(observation, last_action)
         x = torch.from_numpy(np.array(state_tuple, dtype=np.float32)).to(_DEVICE).unsqueeze(0)
     elif state_type == "class_map":
         class_map = observation_to_class_map(observation)
+        class_map = _resize_to_preprocess(class_map, is_class_map=True)
         x = torch.from_numpy(class_map.astype(np.float32)).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     else:
         game = observation[GAME_ROW_SLICE, GAME_COL_SLICE]
         game = game.astype(np.float32) / 255.0
+        game = _resize_to_preprocess(game, is_class_map=False)
         x = torch.from_numpy(game).to(torch.float32).to(_DEVICE).unsqueeze(0).unsqueeze(0)
     with torch.no_grad():
         action_index = int(net(x).max(1).indices.item())
