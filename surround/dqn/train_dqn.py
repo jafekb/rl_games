@@ -173,7 +173,7 @@ class DQNTrainer:
             full_action_space=False,
             difficulty=constants.DIFFICULTY,
             mode=constants.MODE,
-            frameskip=constants.DQN_FRAME_SKIP,
+            frameskip=constants.FRAME_SKIP,
         )
         self.n_actions = self.env.action_space.n - 1  # ignore NOOP
         self.state_type = constants.DQN_STATE_TYPE

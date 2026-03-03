@@ -8,7 +8,7 @@ GRID_COLS = 38
 EMPTY_CELL = 0
 WALL_CELL = 1
 EGO_CELL = 2
-FRAME_SKIP = 8
+FRAME_SKIP = 4
 DEBUG_STATE = False
 
 # Env / run
@@ -33,7 +33,6 @@ Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
-DQN_FRAME_SKIP = 4
 # Input type:
 #     - "state_tuple": 7-tuple -> MLP
 #     - "grayscale": image -> CNN
@@ -61,3 +60,20 @@ DQN_CHECKPOINT_INTERVAL = 50
 DQN_POLICY_NET_LATEST = DQN_CHECKPOINT_DIR / "policy_net_latest.pt"
 DQN_POLICY_NET_BEST = DQN_CHECKPOINT_DIR / "policy_net_best.pt"
 DQN_CHECKPOINT_METADATA = DQN_CHECKPOINT_DIR / "metadata.json"
+
+# PPO (state-tuple input)
+STATE_TUPLE_DIM = 7
+PPO_LR = 3e-4
+PPO_GAMMA = 0.99
+PPO_EPS_CLIP = 0.2
+PPO_EPOCHS = 10
+PPO_ENTROPY_COEF = 0.02
+PPO_GRAD_CLIP = 0  # 0 = disabled; use 0.5 for extra stability if needed
+PPO_UPDATE_TIMESTEP = 2000
+PPO_NUM_EPISODES = 2000
+PPO_LOG_DIR = Path("runs/surround/ppo/rollout2000_2k_ep")
+PPO_CHECKPOINT_DIR = PPO_LOG_DIR / "checkpoints"
+PPO_POLICY_LATEST = PPO_CHECKPOINT_DIR / "policy_latest.pt"
+PPO_POLICY_BEST = PPO_CHECKPOINT_DIR / "policy_best.pt"
+PPO_CHECKPOINT_METADATA = PPO_CHECKPOINT_DIR / "metadata.json"
+PPO_CHECKPOINT_INTERVAL = 50
