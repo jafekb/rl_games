@@ -475,7 +475,9 @@ def _load_policy_net() -> torch.nn.Module:
         state_dict, metadata = load_checkpoint(
             constants.DQN_POLICY_NET_LATEST, map_location=_DEVICE
         )
-        state_type = metadata.get("dqn_state_type") or constants.DQN_STATE_TYPE
+        if "dqn_state_type" not in metadata:
+            raise ValueError("Checkpoint missing dqn_state_type; re-save from current trainer.")
+        state_type = metadata["dqn_state_type"]
         _POLICY_NET_STATE_TYPE = state_type
         if state_type == "state_tuple":
             _POLICY_NET_CACHE = DqnMlp(constants.N_ACTIONS).to(_DEVICE)
@@ -491,7 +493,7 @@ def _load_policy_net() -> torch.nn.Module:
 def greedy_dqn_policy(action_space, observation, info, last_action):
     """Greedy policy using the latest saved DQN weights (same signature as greedy_q_policy)."""
     net = _load_policy_net()
-    state_type = _POLICY_NET_STATE_TYPE or constants.DQN_STATE_TYPE
+    state_type = _POLICY_NET_STATE_TYPE
     if state_type == "state_tuple":
         state_tuple = get_state_from_observation(observation, last_action)
         x = torch.from_numpy(np.array(state_tuple, dtype=np.float32)).to(_DEVICE).unsqueeze(0)

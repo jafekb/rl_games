@@ -56,9 +56,9 @@ def test_dqn_mlp_forward_shape():
 
 
 def test_dqn_cnn_forward_shape():
-    """DQN(4): input (batch, 1, H, W) -> output (batch, 4)."""
+    """DQN(4): input (batch, 1, H, W) -> output (batch, 4). Uses DQN_PREPROCESS spatial size."""
     net = DQN(n_actions=4)
-    h, w = constants.DQN_GAME_HEIGHT, constants.DQN_GAME_WIDTH
+    h, w = constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH
     x = torch.randn(2, 1, h, w)
     out = net(x)
     assert out.shape == (2, 4)
@@ -125,9 +125,10 @@ def test_trainer_one_step_per_state_type(state_type, monkeypatch, tmp_path):
         assert isinstance(preprocessed, tuple)
     else:
         assert state_tensor.dim() == 4
-        assert state_tensor.shape[0] == 1 and state_tensor.shape[1] == 1
-        assert state_tensor.shape[2] == constants.DQN_GAME_HEIGHT
-        assert state_tensor.shape[3] == constants.DQN_GAME_WIDTH
+        assert state_tensor.shape[0] == 1
+        assert state_tensor.shape[1] in (1, 4)  # 1=single frame, 4=frame stack
+        assert state_tensor.shape[2] == constants.DQN_PREPROCESS_HEIGHT
+        assert state_tensor.shape[3] == constants.DQN_PREPROCESS_WIDTH
         assert isinstance(preprocessed, np.ndarray)
 
     # One forward pass
