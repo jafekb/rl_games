@@ -78,6 +78,17 @@ PPO_POLICY_BEST = PPO_CHECKPOINT_DIR / "policy_best.pt"
 PPO_CHECKPOINT_METADATA = PPO_CHECKPOINT_DIR / "metadata.json"
 PPO_CHECKPOINT_INTERVAL = 50
 
+# D3QN Experiment 2 (stability fixes over exp1)
+# Changes: learning_starts=10K, PER alpha 0.6→0.4, normalized input /3.0, terminal fix
+D3QN_EXP2_PER_ALPHA = 0.4
+D3QN_EXP2_LEARNING_STARTS = 10_000
+D3QN_EXP2_LOG_DIR = Path("runs/surround/d3qn/exp2")
+D3QN_EXP2_CHECKPOINT_DIR = D3QN_EXP2_LOG_DIR / "checkpoints"
+D3QN_EXP2_CHECKPOINT_INTERVAL = 50
+D3QN_EXP2_POLICY_NET_LATEST = D3QN_EXP2_CHECKPOINT_DIR / "policy_net_latest.pt"
+D3QN_EXP2_POLICY_NET_BEST = D3QN_EXP2_CHECKPOINT_DIR / "policy_net_best.pt"
+D3QN_EXP2_CHECKPOINT_METADATA = D3QN_EXP2_CHECKPOINT_DIR / "metadata.json"
+
 # D3QN (Double Dueling DQN + Prioritized Experience Replay)
 D3QN_MEMORY_CAPACITY = 100_000
 D3QN_BATCH_SIZE = 128
