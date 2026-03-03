@@ -33,9 +33,52 @@ from tqdm import trange
 
 from surround.conf import constants
 from surround.utils.checkpoint import save_checkpoint
-from surround.utils.video_extract_locations import observation_to_class_map
+from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
+
+
+# ---------------------------------------------------------------------------
+# Env stepping helper
+# ---------------------------------------------------------------------------
+
+
+def _step_until_new_frame(
+    env: gym.Env,
+    last_pos: dict,
+    action_id: int,
+    max_substeps: int = 20,
+) -> tuple[np.ndarray, float, bool, bool, dict]:
+    """Step env until ego or opponent position changes (or episode ends).
+
+    Ensures consecutive frames are distinct and useful by only accepting
+    a new frame when the game state (ego/opp positions) has actually changed.
+    Accumulated reward across all substeps is returned as the total reward.
+    """
+    total_reward = 0.0
+    observation, reward, terminated, truncated, info = None, 0.0, False, False, {}
+    locs: dict = {"ego": None, "opp": None}
+
+    for _ in range(max_substeps):
+        observation, reward, terminated, truncated, info = env.step(action_id)
+        locs = get_location(observation)
+        total_reward += reward
+        if locs["ego"] is None or locs["opp"] is None:
+            continue
+        done = terminated or truncated or abs(reward) == 1
+        if done:
+            break
+        if (
+            last_pos.get("ego") is None
+            or last_pos.get("opp") is None
+            or locs["ego"] != last_pos["ego"]
+            or locs["opp"] != last_pos["opp"]
+        ):
+            break
+
+    info = dict(info)
+    info["location"] = {"ego": locs["ego"], "opp": locs["opp"]}
+    return observation.copy(), total_reward, terminated, truncated, info
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +505,10 @@ class D3QNTrainer:
             )
 
             observation, _info = self.env.reset()
+            last_pos = {
+                "ego": get_location(observation)["ego"],
+                "opp": get_location(observation)["opp"],
+            }
             state = self._to_tensor(self._preprocess(observation))
 
             terminal_reward = 0.0
@@ -474,7 +521,10 @@ class D3QNTrainer:
             for t in trange(constants.MAX_CYCLES, leave=False):
                 action = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
-                observation, reward, terminated, truncated, _info = self.env.step(action_id)
+                observation, reward, terminated, truncated, _info = _step_until_new_frame(
+                    self.env, last_pos, action_id
+                )
+                last_pos = _info["location"]
                 reward_t = torch.tensor([reward], device=self.device)
                 done = terminated or truncated or abs(reward) == 1
 
