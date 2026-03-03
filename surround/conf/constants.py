@@ -8,7 +8,7 @@ GRID_COLS = 38
 EMPTY_CELL = 0
 WALL_CELL = 1
 EGO_CELL = 2
-FRAME_SKIP = 8
+FRAME_SKIP = 4
 DEBUG_STATE = False
 
 # Env / run
@@ -33,7 +33,6 @@ Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
-DQN_FRAME_SKIP = 4
 # Input type:
 #     - "state_tuple": 7-tuple -> MLP
 #     - "grayscale": image -> CNN

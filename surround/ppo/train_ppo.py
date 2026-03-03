@@ -150,7 +150,7 @@ class PPOTrainer:
         self.env = make_env(
             constants.DIFFICULTY,
             constants.MODE,
-            frameskip=constants.DQN_FRAME_SKIP,
+            frameskip=constants.FRAME_SKIP,
         )
         self.n_actions = self.env.action_space.n - 1
         self.agent = PPO(
@@ -178,7 +178,6 @@ class PPOTrainer:
                         [
                             "episode/steps_survived_win",
                             "episode/steps_survived_loss",
-                            "episode/steps_survived_trunc",
                         ],
                     ]
                 }
@@ -227,6 +226,7 @@ class PPOTrainer:
             )
 
     def run(self) -> None:
+        """Run the PPO training loop until PPO_NUM_EPISODES."""
         memory: dict = {
             "states": [],
             "actions": [],
@@ -290,11 +290,6 @@ class PPOTrainer:
                     self.writer.add_scalar(
                         "episode/steps_survived_loss",
                         steps_survived if terminal_reward < 0 else float("nan"),
-                        episode_index,
-                    )
-                    self.writer.add_scalar(
-                        "episode/steps_survived_trunc",
-                        steps_survived if terminal_reward == 0 else float("nan"),
                         episode_index,
                     )
                     if steps_survived > self.best_steps_survived:
