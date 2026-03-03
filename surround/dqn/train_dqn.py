@@ -249,12 +249,31 @@ class DQNTrainer:
             dtype=torch.long,
         )
 
-    def _optimize_model(self) -> dict[str, float] | None:
-        if len(self.memory) < constants.BATCH_SIZE:
+    def _sample_replay(self) -> list:
+        """Sample BATCH_SIZE transitions; recency-weighted if DQN_RECENCY_SAMPLING_EXPONENT > 0."""
+        n = len(self.memory)
+        if n < constants.BATCH_SIZE:
             return None
+        if constants.DQN_RECENCY_SAMPLING_EXPONENT <= 0.0:
+            indices = random.sample(range(n), constants.BATCH_SIZE)
+        else:
+            # memory[0] = oldest, memory[-1] = newest; weight (i+1)^exp favors recent
+            weights = np.power(
+                np.arange(1, n + 1, dtype=np.float64), constants.DQN_RECENCY_SAMPLING_EXPONENT
+            )
+            weights /= weights.sum()
+            indices = (
+                np.random.default_rng()
+                .choice(n, size=constants.BATCH_SIZE, replace=False, p=weights)
+                .tolist()
+            )
+        return [self.memory[i] for i in indices]
 
-        transitions = random.sample(self.memory, constants.BATCH_SIZE)
-        batch = Transition(*zip(*transitions))
+    def _optimize_model(self) -> dict[str, float] | None:
+        sampled = self._sample_replay()
+        if sampled is None:
+            return None
+        batch = Transition(*zip(*sampled))
 
         non_final_mask = torch.tensor(
             tuple(s is not None for s in batch.next_state),

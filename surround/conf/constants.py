@@ -46,7 +46,11 @@ EPS_END = 0.01
 EPS_DECAY_FRACTION = 0.01
 TAU = 0.005
 LR = 3e-4
-MEMORY_CAPACITY = 10_000
+# Larger buffer reduces replay lag (old off-policy data diluted). 50k ~5x current.
+MEMORY_CAPACITY = 50_000
+# Recency-weighted sampling: prefer recent transitions (reduces replay lag).
+# 0 = uniform (original), >0 = bias toward recent; 1.0 = linear, 2.0 = stronger.
+DQN_RECENCY_SAMPLING_EXPONENT = 1.0
 NUM_EPISODES = 50_000
 GAME_ROW_SLICE = slice(35, 198)
 GAME_COL_SLICE = slice(4, 156)
