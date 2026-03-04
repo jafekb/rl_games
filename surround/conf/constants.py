@@ -78,6 +78,23 @@ PPO_POLICY_BEST = PPO_CHECKPOINT_DIR / "policy_best.pt"
 PPO_CHECKPOINT_METADATA = PPO_CHECKPOINT_DIR / "metadata.json"
 PPO_CHECKPOINT_INTERVAL = 50
 
+# D3QN Experiment 5 (match baseline buffer/epsilon: MEMORY 100K->10K, EPS_DECAY 0.15->0.01)
+# Changes from exp4: memory capacity 100K->10K, eps_decay_fraction 0.15->0.01, eps_end 0.05->0.01,
+# learning_starts 10K->1K (scaled with buffer). N-step=10 and all else kept from exp4.
+D3QN_EXP5_N_STEP = 10
+D3QN_EXP5_LR = 1e-4
+D3QN_EXP5_LEARNING_STARTS = 1_000
+D3QN_EXP5_UPDATE_EVERY = 4
+D3QN_EXP5_MEMORY_CAPACITY = 10_000
+D3QN_EXP5_EPS_DECAY_FRACTION = 0.01
+D3QN_EXP5_EPS_END = 0.01
+D3QN_EXP5_LOG_DIR = Path("runs/surround/d3qn/exp5")
+D3QN_EXP5_CHECKPOINT_DIR = D3QN_EXP5_LOG_DIR / "checkpoints"
+D3QN_EXP5_CHECKPOINT_INTERVAL = 50
+D3QN_EXP5_POLICY_NET_LATEST = D3QN_EXP5_CHECKPOINT_DIR / "policy_net_latest.pt"
+D3QN_EXP5_POLICY_NET_BEST = D3QN_EXP5_CHECKPOINT_DIR / "policy_net_best.pt"
+D3QN_EXP5_CHECKPOINT_METADATA = D3QN_EXP5_CHECKPOINT_DIR / "metadata.json"
+
 # D3QN Experiment 4 (n-step returns, n=10; otherwise identical to exp3)
 D3QN_EXP4_N_STEP = 10
 D3QN_EXP4_LR = 1e-4
