@@ -1,18 +1,15 @@
-"""Train a D3QN agent (Double Dueling DQN + Prioritized Experience Replay) for Surround.
+"""Train a D3QN (Dueling Double DQN) agent for the Surround game.
 
-Key improvements over vanilla DQN (train_dqn.py / exp16):
-  1. Double DQN: policy net selects next action, target net evaluates → less Q-overestimation.
-  2. Dueling architecture: separate V(s) and A(s,a) streams → better value estimates in
-     states where most actions are equivalent (typical mid-board Surround positions).
-  3. Prioritized Experience Replay (PER): sample proportional to |TD error|^alpha → focuses
-     training on surprising, high-information transitions near walls and dead-ends.
-  4. Larger replay buffer (100 K vs 10 K) → more stable gradients, less forgetting.
-  5. Conservative gradient clipping (norm ≤ 1.0) → stable training alongside PER.
-  6. Gentler epsilon decay (15 % of episodes vs 1 %) → adequate exploration throughout.
+Architecture:
+  - DuelingDQN: 3x Conv2d (1->32->64->128, kernel=5, stride=2) + separate value/advantage heads
+  - Double DQN target: policy net selects action, target net evaluates
+  - Uniform replay buffer with n-step discounted returns (n=10)
+  - Class-map input (4-class: empty/wall/opp/ego), soft target updates
 
-See docs/d3qn_exp1.md for full analysis and references.
+Log dir: runs/surround/d3qn/d3qn/
 """
 
+import collections
 import json
 import logging
 import math
@@ -49,12 +46,7 @@ def _step_until_new_frame(
     action_id: int,
     max_substeps: int = 20,
 ) -> tuple[np.ndarray, float, bool, bool, dict]:
-    """Step env until ego or opponent position changes (or episode ends).
-
-    Ensures consecutive frames are distinct and useful by only accepting
-    a new frame when the game state (ego/opp positions) has actually changed.
-    Accumulated reward across all substeps is returned as the total reward.
-    """
+    """Step env until ego or opponent position changes (or episode ends)."""
     total_reward = 0.0
     observation, reward, terminated, truncated, info = None, 0.0, False, False, {}
     locs: dict = {"ego": None, "opp": None}
@@ -82,7 +74,7 @@ def _step_until_new_frame(
 
 
 # ---------------------------------------------------------------------------
-# Epsilon schedule (same formula as train_dqn.py)
+# Epsilon schedule
 # ---------------------------------------------------------------------------
 
 
@@ -112,7 +104,6 @@ def _conv_out_size(
 
 
 def _resize_to_preprocess(arr: np.ndarray) -> np.ndarray:
-    """Resize class-map to DQN_PREPROCESS_HEIGHT x DQN_PREPROCESS_WIDTH (nearest-neighbour)."""
     h, w = constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH
     return cv2.resize(arr, (w, h), interpolation=cv2.INTER_NEAREST)
 
@@ -123,14 +114,7 @@ def _resize_to_preprocess(arr: np.ndarray) -> np.ndarray:
 
 
 class DuelingDQN(torch.nn.Module):
-    """Dueling CNN for (1, H, W) class-map input; outputs Q-values per action.
-
-    Architecture:
-        3x Conv2d shared backbone -> flat features
-        Value stream:     Linear(flat, 256) -> Linear(256, 1)      = V(s)
-        Advantage stream: Linear(flat, 256) -> Linear(256, n_actions) = A(s,a)
-        Q(s,a) = V(s) + A(s,a) - mean_a A(s,a)
-    """
+    """Dueling CNN for (1, H, W) class-map input; outputs Q-values per action."""
 
     def __init__(self, n_actions: int) -> None:
         super().__init__()
@@ -153,148 +137,91 @@ class DuelingDQN(torch.nn.Module):
         x = torch.nn.functional.relu(self.conv2(x))
         x = torch.nn.functional.relu(self.conv3(x))
         x = x.view(x.size(0), -1)
-
         v = torch.nn.functional.relu(self.val1(x))
-        v = self.val2(v)  # (batch, 1)
-
+        v = self.val2(v)
         a = torch.nn.functional.relu(self.adv1(x))
-        a = self.adv2(a)  # (batch, n_actions)
-
+        a = self.adv2(a)
         return v + a - a.mean(dim=1, keepdim=True)
 
 
 # ---------------------------------------------------------------------------
-# SumTree (for Prioritized Experience Replay)
+# Uniform replay memory
 # ---------------------------------------------------------------------------
 
 
-class _SumTree:
-    """Binary segment tree supporting O(log N) priority-weighted sampling.
-
-    Leaf i stores priority p_i.  Internal nodes store subtree sums so that
-    stratified sampling (splitting [0, total] into equal segments) runs in
-    O(log N) per sample.
-    """
+class UniformReplayMemory:
+    """Circular uniform experience replay buffer."""
 
     def __init__(self, capacity: int) -> None:
-        self.capacity = capacity
-        self._tree = np.zeros(2 * capacity - 1, dtype=np.float64)
-        self._data: list = [None] * capacity
-        self._n = 0
-        self._write = 0
-
-    # -- internal helpers --------------------------------------------------
-
-    def _propagate(self, idx: int, delta: float) -> None:
-        parent = (idx - 1) // 2
-        self._tree[parent] += delta
-        if parent:
-            self._propagate(parent, delta)
-
-    def _update_leaf(self, leaf_idx: int, priority: float) -> None:
-        delta = priority - self._tree[leaf_idx]
-        self._tree[leaf_idx] = priority
-        self._propagate(leaf_idx, delta)
-
-    # -- public API --------------------------------------------------------
-
-    def add(self, priority: float, data: object) -> None:
-        leaf_idx = self._write + self.capacity - 1
-        self._data[self._write] = data
-        self._update_leaf(leaf_idx, priority)
-        self._write = (self._write + 1) % self.capacity
-        self._n = min(self._n + 1, self.capacity)
-
-    def update(self, leaf_idx: int, priority: float) -> None:
-        self._update_leaf(leaf_idx, priority)
-
-    def get(self, s: float) -> tuple[int, float, object]:
-        """Return (leaf_idx, priority, data) for cumulative sum s."""
-        idx = 0
-        while True:
-            left = 2 * idx + 1
-            right = left + 1
-            if left >= len(self._tree):
-                break
-            if s <= self._tree[left]:
-                idx = left
-            else:
-                s -= self._tree[left]
-                idx = right
-        data_idx = idx - (self.capacity - 1)
-        return idx, self._tree[idx], self._data[data_idx]
-
-    @property
-    def total(self) -> float:
-        return float(self._tree[0])
-
-    def __len__(self) -> int:
-        return self._n
-
-
-# ---------------------------------------------------------------------------
-# Prioritized Experience Replay
-# ---------------------------------------------------------------------------
-
-
-class PrioritizedReplayMemory:
-    """Prioritized Experience Replay (Schaul et al., 2016).
-
-    Priorities are p_i = (|td_error_i| + eps)^alpha.
-    Importance-sampling weights w_i = (N * p_i / sum_p)^(-beta) correct the bias
-    introduced by non-uniform sampling.  beta is annealed from beta_start -> 1.0
-    over beta_steps updates so the correction is mild early and exact later.
-    """
-
-    _EPS = 1e-5  # small constant to ensure non-zero priority
-
-    def __init__(
-        self,
-        capacity: int,
-        alpha: float = 0.6,
-        beta: float = 0.4,
-        beta_steps: int = 50_000,
-    ) -> None:
-        self._tree = _SumTree(capacity)
-        self.alpha = alpha
-        self.beta = beta
-        self._beta_delta = (1.0 - beta) / max(1, beta_steps)
-        self._max_priority = 1.0
+        self._buffer: collections.deque = collections.deque(maxlen=capacity)
 
     def add(self, transition: Transition) -> None:
-        self._tree.add(self._max_priority, transition)
+        self._buffer.append(transition)
 
-    def sample(self, batch_size: int) -> tuple[list, list[int], torch.Tensor]:
-        """Return (transitions, leaf_indices, IS weights tensor)."""
-        batch, idxs, priorities = [], [], []
-        seg = self._tree.total / batch_size
-        for i in range(batch_size):
-            s = random.uniform(seg * i, seg * (i + 1))
-            idx, priority, data = self._tree.get(s)
-            batch.append(data)
-            idxs.append(idx)
-            priorities.append(max(float(priority), self._EPS))
-
-        probs = np.array(priorities, dtype=np.float64) / self._tree.total
-        weights = (len(self._tree) * probs) ** (-self.beta)
-        weights = (weights / weights.max()).astype(np.float32)
-        return batch, idxs, torch.from_numpy(weights)
-
-    def update_priorities(self, idxs: list[int], td_errors: np.ndarray) -> None:
-        for idx, err in zip(idxs, td_errors):
-            p = (abs(float(err)) + self._EPS) ** self.alpha
-            self._tree.update(idx, p)
-            self._max_priority = max(self._max_priority, p)
-
-    def anneal_beta(self) -> None:
-        self.beta = min(1.0, self.beta + self._beta_delta)
+    def sample(self, batch_size: int) -> list:
+        return random.sample(self._buffer, batch_size)
 
     def __len__(self) -> int:
-        return len(self._tree)
+        return len(self._buffer)
 
 
 # ---------------------------------------------------------------------------
-# Run metadata helper
+# N-step return buffer
+# ---------------------------------------------------------------------------
+
+
+class NStepBuffer:
+    """Accumulates transitions and computes n-step discounted returns.
+
+    Each push() appends one transition and returns ready Transition objects.
+    A transition is ready when n subsequent steps have been collected, or the
+    episode ends (flush). The stored reward is the n-step discounted sum:
+        R_n = r_t + gamma*r_{t+1} + ... + gamma^(k-1)*r_{t+k-1}
+    where k = min(n, steps until episode end).
+    """
+
+    def __init__(self, n: int, gamma: float) -> None:
+        self.n = n
+        self.gamma = gamma
+        self._buf: collections.deque = collections.deque()
+
+    def push(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        reward: float,
+        next_state: torch.Tensor | None,
+        *,
+        flush: bool = False,
+    ) -> list[Transition]:
+        self._buf.append((state, action, reward, next_state))
+        ready: list[Transition] = []
+
+        if len(self._buf) >= self.n:
+            ready.append(self._pop_oldest())
+
+        if next_state is None or flush:
+            while self._buf:
+                ready.append(self._pop_oldest())
+
+        return ready
+
+    def _pop_oldest(self) -> Transition:
+        s0, a0, _, _ = self._buf[0]
+        discounted_return = 0.0
+        final_next: torch.Tensor | None = None
+        for i, (_, _, r, ns) in enumerate(self._buf):
+            discounted_return += (self.gamma**i) * r
+            final_next = ns
+            if ns is None:
+                break
+        self._buf.popleft()
+        reward_t = torch.tensor([discounted_return], device=s0.device, dtype=torch.float32)
+        return Transition(s0, a0, final_next, reward_t)
+
+
+# ---------------------------------------------------------------------------
+# Run metadata
 # ---------------------------------------------------------------------------
 
 
@@ -313,7 +240,7 @@ def _get_run_metadata() -> dict:
 
 
 class D3QNTrainer:
-    """Single class owning env, dueling networks, PER memory, and the training loop."""
+    """D3QN trainer: Dueling Double DQN with uniform replay and n-step returns."""
 
     def __init__(self) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -336,15 +263,11 @@ class D3QNTrainer:
         self.optimizer = torch.optim.AdamW(
             self.policy_net.parameters(), lr=constants.D3QN_LR, amsgrad=True
         )
-
-        self.memory = PrioritizedReplayMemory(
-            capacity=constants.D3QN_MEMORY_CAPACITY,
-            alpha=constants.D3QN_PER_ALPHA,
-            beta=constants.D3QN_PER_BETA_START,
-            beta_steps=constants.D3QN_NUM_EPISODES,
-        )
+        self.memory = UniformReplayMemory(capacity=constants.D3QN_MEMORY_CAPACITY)
+        self.n_step_buf = NStepBuffer(n=constants.D3QN_N_STEP, gamma=constants.D3QN_GAMMA)
 
         self.best_steps_survived = 0
+        self._total_env_steps = 0
         self._run_metadata = _get_run_metadata()
 
         if constants.D3QN_LOG_DIR.exists():
@@ -359,12 +282,9 @@ class D3QNTrainer:
                 "episode/steps_survived_by_outcome": {
                     "steps_survived": [
                         "Multiline",
-                        [
-                            "episode/steps_survived_win",
-                            "episode/steps_survived_loss",
-                        ],
-                    ]
-                }
+                        ["episode/steps_survived_win", "episode/steps_survived_loss"],
+                    ],
+                },
             }
         )
 
@@ -376,8 +296,8 @@ class D3QNTrainer:
         return _resize_to_preprocess(class_map)
 
     def _to_tensor(self, preprocessed: np.ndarray) -> torch.Tensor:
-        """(H, W) uint8 → (1, 1, H, W) float32 tensor on device."""
-        arr = np.asarray(preprocessed, dtype=np.float32)
+        """(H, W) uint8 -> (1, 1, H, W) float32 tensor on device, normalized to [0, 1]."""
+        arr = np.asarray(preprocessed, dtype=np.float32) / 3.0
         return torch.from_numpy(arr).to(self.device).unsqueeze(0).unsqueeze(0)
 
     # -- action selection ---------------------------------------------------
@@ -392,15 +312,13 @@ class D3QNTrainer:
             dtype=torch.long,
         )
 
-    # -- Double DQN optimization with PER ----------------------------------
+    # -- Double DQN optimization with n-step bootstrap ----------------------
 
     def _optimize_model(self) -> dict[str, float] | None:
-        if len(self.memory) < constants.D3QN_BATCH_SIZE:
+        if len(self.memory) < constants.D3QN_LEARNING_STARTS:
             return None
 
-        transitions, tree_idxs, weights = self.memory.sample(constants.D3QN_BATCH_SIZE)
-        weights = weights.to(self.device)
-
+        transitions = self.memory.sample(constants.D3QN_BATCH_SIZE)
         batch = Transition(*zip(*transitions))
 
         non_final_mask = torch.tensor(
@@ -414,7 +332,8 @@ class D3QNTrainer:
 
         state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
-        # Double DQN target: policy net selects action, target net evaluates
+        # Double DQN: policy net selects action, target net evaluates.
+        # Bootstrap coefficient is gamma^n (reward_batch already holds n-step return).
         next_state_values = torch.zeros(constants.D3QN_BATCH_SIZE, device=self.device)
         if non_final_mask.any():
             non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
@@ -424,19 +343,12 @@ class D3QNTrainer:
                     self.target_net(non_final_next_states).gather(1, best_actions).squeeze(1)
                 )
 
-        expected = (next_state_values * constants.D3QN_GAMMA) + reward_batch
+        gamma_n = constants.D3QN_GAMMA**constants.D3QN_N_STEP
+        expected = (next_state_values * gamma_n) + reward_batch
+        loss = torch.nn.functional.smooth_l1_loss(state_action_values, expected.unsqueeze(1))
 
-        # Importance-sampling weighted Huber loss
-        elementwise_loss = torch.nn.functional.smooth_l1_loss(
-            state_action_values, expected.unsqueeze(1), reduction="none"
-        ).squeeze(1)
-        loss = (weights * elementwise_loss).mean()
-
-        # Update priorities with fresh TD errors
         with torch.no_grad():
             td_errors = (expected.unsqueeze(1) - state_action_values).abs().squeeze(1).cpu().numpy()
-        self.memory.update_priorities(tree_idxs, td_errors)
-        self.memory.anneal_beta()
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -453,7 +365,7 @@ class D3QNTrainer:
             "grad_norm": grad_norm.item(),
         }
 
-    # -- soft target update ------------------------------------------------
+    # -- soft target update -------------------------------------------------
 
     def _soft_update_target(self) -> None:
         target = self.target_net.state_dict()
@@ -462,7 +374,7 @@ class D3QNTrainer:
             target[key] = policy[key] * constants.D3QN_TAU + target[key] * (1 - constants.D3QN_TAU)
         self.target_net.load_state_dict(target)
 
-    # -- checkpointing -----------------------------------------------------
+    # -- checkpointing ------------------------------------------------------
 
     def _save_checkpoint(self, episode_index: int, steps_survived: int | None = None) -> None:
         ep = episode_index + 1
@@ -492,7 +404,7 @@ class D3QNTrainer:
                 path, self.policy_net.state_dict(), steps_survived=steps_survived, **meta
             )
 
-    # -- main training loop ------------------------------------------------
+    # -- main training loop -------------------------------------------------
 
     def run(self) -> None:
         for episode_index in trange(constants.D3QN_NUM_EPISODES):
@@ -525,21 +437,29 @@ class D3QNTrainer:
                     self.env, last_pos, action_id
                 )
                 last_pos = _info["location"]
-                reward_t = torch.tensor([reward], device=self.device)
                 done = terminated or truncated or abs(reward) == 1
 
-                next_state = None if terminated else self._to_tensor(self._preprocess(observation))
+                if terminated or abs(reward) == 1:
+                    next_state = None
+                else:
+                    next_state = self._to_tensor(self._preprocess(observation))
 
-                self.memory.add(Transition(state, action, next_state, reward_t))
+                for t_ready in self.n_step_buf.push(
+                    state, action, float(reward), next_state, flush=done
+                ):
+                    self.memory.add(t_ready)
+
                 state = next_state
+                self._total_env_steps += 1
 
-                metrics = self._optimize_model()
-                if metrics is not None:
-                    episode_losses.append(metrics["loss"])
-                    episode_td_errors.append(metrics["td_error"])
-                    episode_q_means.append(metrics["q_mean"])
-                    episode_grad_norms.append(metrics["grad_norm"])
-                self._soft_update_target()
+                if self._total_env_steps % constants.D3QN_UPDATE_EVERY == 0:
+                    metrics = self._optimize_model()
+                    if metrics is not None:
+                        episode_losses.append(metrics["loss"])
+                        episode_td_errors.append(metrics["td_error"])
+                        episode_q_means.append(metrics["q_mean"])
+                        episode_grad_norms.append(metrics["grad_norm"])
+                    self._soft_update_target()
 
                 if done:
                     terminal_reward = float(reward)
@@ -552,18 +472,15 @@ class D3QNTrainer:
                     self.writer.add_scalar(
                         "episode/terminal_reward", terminal_reward, episode_index
                     )
-                    self.writer.add_scalar(
-                        "episode/steps_survived_win",
-                        steps_survived if terminal_reward > 0 else float("nan"),
-                        episode_index,
-                    )
-                    self.writer.add_scalar(
-                        "episode/steps_survived_loss",
-                        steps_survived if terminal_reward < 0 else float("nan"),
-                        episode_index,
-                    )
+                    if terminal_reward > 0:
+                        self.writer.add_scalar(
+                            "episode/steps_survived_win", steps_survived, episode_index
+                        )
+                    elif terminal_reward < 0:
+                        self.writer.add_scalar(
+                            "episode/steps_survived_loss", steps_survived, episode_index
+                        )
                     self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
-                    self.writer.add_scalar("episode/per_beta", self.memory.beta, episode_index)
 
                     if episode_losses:
                         n = len(episode_losses)
