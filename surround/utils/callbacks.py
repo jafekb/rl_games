@@ -173,3 +173,57 @@ def make_tb_writer(log_dir: Path) -> SummaryWriter:
     """Create a SummaryWriter with tensorboardX logging suppressed."""
     logging.getLogger("tensorboardX").setLevel(logging.ERROR)
     return SummaryWriter(log_dir=str(log_dir))
+
+
+class TensorboardCallback(TrainingCallback):
+    """Simple TensorBoard callback for Q-learning training.
+
+    Uses the 4-argument on_episode_end signature expected by QLearning trainer.
+    Kept for backward compatibility with surround/q_learning/train_ql.py.
+    """
+
+    def __init__(self, log_dir: Path) -> None:
+        self.log_dir = log_dir
+        self._writer: SummaryWriter | None = None
+
+    def on_train_start(self) -> None:
+        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
+        self._writer = SummaryWriter(log_dir=str(self.log_dir))
+        self._writer.add_custom_scalars(
+            {
+                "episode/steps_survived_by_outcome": {
+                    "steps_survived": [
+                        "Multiline",
+                        ["episode/steps_survived_win", "episode/steps_survived_loss"],
+                    ],
+                }
+            }
+        )
+
+    def on_episode_end(  # type: ignore[override]
+        self,
+        episode_index: int,
+        episode_steps: int,
+        terminal_reward: float,
+        epsilon: float,
+    ) -> None:
+        if self._writer is None:
+            return
+        self._writer.add_scalar("episode/steps_survived", episode_steps, episode_index)
+        self._writer.add_scalar("episode/terminal_reward", terminal_reward, episode_index)
+        self._writer.add_scalar(
+            "episode/steps_survived_win",
+            episode_steps if terminal_reward > 0 else float("nan"),
+            episode_index,
+        )
+        self._writer.add_scalar(
+            "episode/steps_survived_loss",
+            episode_steps if terminal_reward < 0 else float("nan"),
+            episode_index,
+        )
+        self._writer.add_scalar("episode/epsilon", epsilon, episode_index)
+
+    def on_train_end(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
+            self._writer = None
