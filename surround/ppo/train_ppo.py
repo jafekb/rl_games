@@ -155,7 +155,7 @@ class PPOTrainer:
         )
         self.n_actions = self.env.action_space.n - 1
         self.agent = PPO(
-            constants.STATE_TUPLE_DIM,
+            constants.PPO_STATE_TUPLE_DIM,
             self.n_actions,
             device=self.device,
         )

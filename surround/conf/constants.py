@@ -33,7 +33,7 @@ WINDOW_SIZE = 7
 
 # Paths (Q-learning)
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
-LOG_DIR = Path("runs/surround/ql_visits")
+QL_LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
 # Input type:
@@ -55,11 +55,11 @@ DQN_PREPROCESS_WIDTH = 80
 N_ACTIONS = 4
 DQN_LOG_DIR = Path("runs/surround/dqn/exp16")
 DQN_EPISODE_VIDEO_FPS = 10
-VISUALIZE_EPISODES = False
+DQN_VISUALIZE_EPISODES = False
 DQN_CKPT = CheckpointPaths(DQN_LOG_DIR)
 
 # PPO (state-tuple input)
-STATE_TUPLE_DIM = 7
+PPO_STATE_TUPLE_DIM = 7
 PPO_LR = 3e-4
 PPO_EPS_CLIP = 0.2
 PPO_EPOCHS = 10

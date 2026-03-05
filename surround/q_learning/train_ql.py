@@ -23,7 +23,7 @@ class QLearning:
         epsilon_decay_steps: int,
         episodes: int,
         state_mode: str,
-        log_dir: Path = constants.LOG_DIR,
+        log_dir: Path = constants.QL_LOG_DIR,
         callbacks: list[TrainingCallback] | None = None,
     ):
         self.state_mode = state_mode

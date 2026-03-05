@@ -329,7 +329,7 @@ class DQNTrainer:
                 "opp": get_location(observation)["opp"],
             }
             video_writer = None
-            if constants.VISUALIZE_EPISODES:
+            if constants.DQN_VISUALIZE_EPISODES:
                 observation = observation.copy()
                 episodes_dir = constants.DQN_LOG_DIR / "episodes"
                 episodes_dir.mkdir(parents=True, exist_ok=True)
