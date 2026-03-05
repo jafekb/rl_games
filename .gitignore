@@ -194,6 +194,9 @@ cython_debug/
 # Local video outputs
 video/
 
+# TensorBoard / training run logs
+runs/
+
 # PyPI configuration file
 .pypirc
 

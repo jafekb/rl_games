@@ -61,7 +61,7 @@ class PPO:
         action_dim: int,
         *,
         lr: float = constants.PPO_LR,
-        gamma: float = constants.PPO_GAMMA,
+        gamma: float = constants.GAMMA,
         eps_clip: float = constants.PPO_EPS_CLIP,
         epochs: int = constants.PPO_EPOCHS,
         device: torch.device | None = None,
@@ -155,7 +155,7 @@ class PPOTrainer:
         )
         self.n_actions = self.env.action_space.n - 1
         self.agent = PPO(
-            constants.STATE_TUPLE_DIM,
+            constants.PPO_STATE_TUPLE_DIM,
             self.n_actions,
             device=self.device,
         )
@@ -168,7 +168,7 @@ class PPOTrainer:
             raise FileExistsError(
                 f"Log dir already exists: {constants.PPO_LOG_DIR}. Remove it before a fresh run."
             )
-        constants.PPO_CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+        constants.PPO_CKPT.dir.mkdir(parents=True, exist_ok=True)
         logging.getLogger("tensorboardX").setLevel(logging.ERROR)
         self.writer = SummaryWriter(log_dir=str(constants.PPO_LOG_DIR))
         self.writer.add_custom_scalars(
@@ -204,7 +204,7 @@ class PPOTrainer:
             "total_steps": self._total_steps,
         }
         save_checkpoint(
-            constants.PPO_POLICY_LATEST,
+            constants.PPO_CKPT.latest,
             self.agent.policy.state_dict(),
             steps_survived=steps_survived,
             **meta,
@@ -214,11 +214,9 @@ class PPOTrainer:
             if self.best_steps_survived > 0
             else meta
         )
-        constants.PPO_CHECKPOINT_METADATA.write_text(
-            json.dumps(json_meta, indent=2), encoding="utf-8"
-        )
-        if ep % constants.PPO_CHECKPOINT_INTERVAL == 0:
-            path = constants.PPO_CHECKPOINT_DIR / f"policy_{ep:04d}.pt"
+        constants.PPO_CKPT.metadata.write_text(json.dumps(json_meta, indent=2), encoding="utf-8")
+        if ep % constants.CHECKPOINT_INTERVAL == 0:
+            path = constants.PPO_CKPT.dir / f"policy_{ep:04d}.pt"
             save_checkpoint(
                 path,
                 self.agent.policy.state_dict(),
@@ -227,7 +225,7 @@ class PPOTrainer:
             )
 
     def run(self) -> None:
-        """Run the PPO training loop until PPO_NUM_EPISODES."""
+        """Run the PPO training loop until NUM_EPISODES."""
         memory: dict = {
             "states": [],
             "actions": [],
@@ -237,7 +235,7 @@ class PPOTrainer:
         }
         timestep = 0
 
-        for episode_index in trange(constants.PPO_NUM_EPISODES):
+        for episode_index in trange(constants.NUM_EPISODES):
             observation, _ = self.env.reset()
             last_action = ACTION_WORD_TO_ID["LEFT"]
             last_pos = {
@@ -303,7 +301,7 @@ class PPOTrainer:
                     if steps_survived > self.best_steps_survived:
                         self.best_steps_survived = steps_survived
                         save_checkpoint(
-                            constants.PPO_POLICY_BEST,
+                            constants.PPO_CKPT.best,
                             self.agent.policy.state_dict(),
                             steps_survived=steps_survived,
                             **{**self._run_metadata, "episodes_completed": episode_index + 1},

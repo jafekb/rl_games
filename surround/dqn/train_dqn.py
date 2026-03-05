@@ -260,7 +260,7 @@ class DQNTrainer:
         next_state_values = torch.zeros(constants.BATCH_SIZE, device=self.device)
         with torch.no_grad():
             next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(1).values
-        expected_state_action_values = (next_state_values * constants.GAMMA_DQN) + reward_batch
+        expected_state_action_values = (next_state_values * constants.GAMMA) + reward_batch
 
         criterion = torch.nn.SmoothL1Loss()
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
@@ -297,7 +297,7 @@ class DQNTrainer:
             "dqn_state_type": self.state_type,
         }
         save_checkpoint(
-            constants.DQN_POLICY_NET_LATEST,
+            constants.DQN_CKPT.latest,
             self.policy_net.state_dict(),
             steps_survived=steps_survived,
             **meta,
@@ -307,11 +307,9 @@ class DQNTrainer:
             if self.best_steps_survived > 0
             else meta
         )
-        constants.DQN_CHECKPOINT_METADATA.write_text(
-            json.dumps(json_meta, indent=2), encoding="utf-8"
-        )
-        if ep % constants.DQN_CHECKPOINT_INTERVAL == 0:
-            path = constants.DQN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
+        constants.DQN_CKPT.metadata.write_text(json.dumps(json_meta, indent=2), encoding="utf-8")
+        if ep % constants.CHECKPOINT_INTERVAL == 0:
+            path = constants.DQN_CKPT.dir / f"policy_net_{ep:04d}.pt"
             save_checkpoint(
                 path, self.policy_net.state_dict(), steps_survived=steps_survived, **meta
             )
@@ -331,7 +329,7 @@ class DQNTrainer:
                 "opp": get_location(observation)["opp"],
             }
             video_writer = None
-            if constants.VISUALIZE_EPISODES:
+            if constants.DQN_VISUALIZE_EPISODES:
                 observation = observation.copy()
                 episodes_dir = constants.DQN_LOG_DIR / "episodes"
                 episodes_dir.mkdir(parents=True, exist_ok=True)
@@ -416,7 +414,7 @@ class DQNTrainer:
                     if steps_survived > self.best_steps_survived:
                         self.best_steps_survived = steps_survived
                         save_checkpoint(
-                            constants.DQN_POLICY_NET_BEST,
+                            constants.DQN_CKPT.best,
                             self.policy_net.state_dict(),
                             steps_survived=steps_survived,
                             **{
@@ -442,13 +440,11 @@ _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def _load_policy_net() -> torch.nn.Module:
     global _POLICY_NET_CACHE, _POLICY_NET_STATE_TYPE
     if _POLICY_NET_CACHE is None:
-        if not constants.DQN_POLICY_NET_LATEST.exists():
+        if not constants.DQN_CKPT.latest.exists():
             raise FileNotFoundError(
-                f"DQN checkpoint not found: {constants.DQN_POLICY_NET_LATEST}. Run training first."
+                f"DQN checkpoint not found: {constants.DQN_CKPT.latest}. Run training first."
             )
-        state_dict, metadata = load_checkpoint(
-            constants.DQN_POLICY_NET_LATEST, map_location=_DEVICE
-        )
+        state_dict, metadata = load_checkpoint(constants.DQN_CKPT.latest, map_location=_DEVICE)
         if "dqn_state_type" not in metadata:
             raise ValueError("Checkpoint missing dqn_state_type; re-save from current trainer.")
         state_type = metadata["dqn_state_type"]

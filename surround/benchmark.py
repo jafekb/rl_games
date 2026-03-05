@@ -79,8 +79,8 @@ def main() -> None:
             data = json.loads(constants.Q_TABLE_PATH.read_text(encoding="utf-8"))
             analysis = data.get("analysis", {})
             q_table_episodes = analysis.get("episode_index")
-        if constants.DQN_CHECKPOINT_METADATA.exists():
-            dqn_meta = json.loads(constants.DQN_CHECKPOINT_METADATA.read_text(encoding="utf-8"))
+        if constants.DQN_CKPT.metadata.exists():
+            dqn_meta = json.loads(constants.DQN_CKPT.metadata.read_text(encoding="utf-8"))
             dqn_episodes = dqn_meta.get("episodes_completed")
         for policy_name, policy in POLICIES.items():
             video_writer = None
