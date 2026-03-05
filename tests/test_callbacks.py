@@ -266,7 +266,7 @@ class TestTrainingMetrics:
 class TestDuelingDQNStreams:
     @pytest.fixture
     def net(self):
-        from surround.dqn.train_d3qn import DuelingDQN
+        from surround.d3qn.train_d3qn import DuelingDQN
 
         return DuelingDQN(n_actions=4)
 
