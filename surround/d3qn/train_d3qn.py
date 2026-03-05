@@ -391,7 +391,7 @@ class D3QNTrainer:
             "dqn_state_type": "class_map",
         }
         save_checkpoint(
-            constants.D3QN_POLICY_NET_LATEST,
+            constants.D3QN_CKPT.latest,
             self.policy_net.state_dict(),
             steps_survived=steps_survived,
             **meta,
@@ -401,11 +401,9 @@ class D3QNTrainer:
             if self.best_steps_survived > 0
             else meta
         )
-        constants.D3QN_CHECKPOINT_METADATA.write_text(
-            json.dumps(json_meta, indent=2), encoding="utf-8"
-        )
+        constants.D3QN_CKPT.metadata.write_text(json.dumps(json_meta, indent=2), encoding="utf-8")
         if ep % constants.CHECKPOINT_INTERVAL == 0:
-            path = constants.D3QN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
+            path = constants.D3QN_CKPT.dir / f"policy_net_{ep:04d}.pt"
             save_checkpoint(
                 path, self.policy_net.state_dict(), steps_survived=steps_survived, **meta
             )
@@ -496,7 +494,7 @@ class D3QNTrainer:
                     if steps_survived > self.best_steps_survived:
                         self.best_steps_survived = steps_survived
                         save_checkpoint(
-                            constants.D3QN_POLICY_NET_BEST,
+                            constants.D3QN_CKPT.best,
                             self.policy_net.state_dict(),
                             steps_survived=steps_survived,
                             **{

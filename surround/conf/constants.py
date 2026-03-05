@@ -1,6 +1,31 @@
 """Surround game and training configuration constants."""
 
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class CheckpointPaths:
+    """Checkpoint file paths derived from a training log directory."""
+
+    log_dir: Path
+
+    @property
+    def dir(self) -> Path:
+        return self.log_dir / "checkpoints"
+
+    @property
+    def latest(self) -> Path:
+        return self.dir / "policy_latest.pt"
+
+    @property
+    def best(self) -> Path:
+        return self.dir / "policy_best.pt"
+
+    @property
+    def metadata(self) -> Path:
+        return self.dir / "metadata.json"
+
 
 # Game / simulation
 GRID_ROWS = 18
@@ -15,7 +40,7 @@ DEBUG_STATE = False
 DIFFICULTY = 0
 MODE = 0
 SEED = 0
-MAX_CYCLES = 1_000
+MAX_CYCLES = 1000
 CHECKPOINT_INTERVAL = 1000
 NUM_EPISODES = 50_000
 
@@ -54,10 +79,7 @@ N_ACTIONS = 4
 DQN_LOG_DIR = Path("runs/surround/dqn/exp16")
 DQN_EPISODE_VIDEO_FPS = 10
 VISUALIZE_EPISODES = False
-DQN_CHECKPOINT_DIR = DQN_LOG_DIR / "checkpoints"
-DQN_POLICY_NET_LATEST = DQN_CHECKPOINT_DIR / "policy_net_latest.pt"
-DQN_POLICY_NET_BEST = DQN_CHECKPOINT_DIR / "policy_net_best.pt"
-DQN_CHECKPOINT_METADATA = DQN_CHECKPOINT_DIR / "metadata.json"
+DQN_CKPT = CheckpointPaths(DQN_LOG_DIR)
 
 # PPO (state-tuple input)
 STATE_TUPLE_DIM = 7
@@ -68,10 +90,7 @@ PPO_ENTROPY_COEF = 0.02
 PPO_GRAD_CLIP = 0  # 0 = disabled; use 0.5 for extra stability if needed
 PPO_UPDATE_TIMESTEP = 2000
 PPO_LOG_DIR = Path("runs/surround/ppo/rollout2000_2k_ep")
-PPO_CHECKPOINT_DIR = PPO_LOG_DIR / "checkpoints"
-PPO_POLICY_LATEST = PPO_CHECKPOINT_DIR / "policy_latest.pt"
-PPO_POLICY_BEST = PPO_CHECKPOINT_DIR / "policy_best.pt"
-PPO_CHECKPOINT_METADATA = PPO_CHECKPOINT_DIR / "metadata.json"
+PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 
 # D3QN (Dueling Double DQN, uniform replay, n-step returns)
 # Hyperparameters reflect best-performing config (exp5).
@@ -80,7 +99,4 @@ D3QN_N_STEP = 10
 D3QN_LEARNING_STARTS = 1_000
 D3QN_UPDATE_EVERY = 4
 D3QN_LOG_DIR = Path("runs/surround/d3qn/d3qn")
-D3QN_CHECKPOINT_DIR = D3QN_LOG_DIR / "checkpoints"
-D3QN_POLICY_NET_LATEST = D3QN_CHECKPOINT_DIR / "policy_net_latest.pt"
-D3QN_POLICY_NET_BEST = D3QN_CHECKPOINT_DIR / "policy_net_best.pt"
-D3QN_CHECKPOINT_METADATA = D3QN_CHECKPOINT_DIR / "metadata.json"
+D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
