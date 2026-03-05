@@ -6,7 +6,6 @@ See https://docs.pytorch.org/tutorials/intermediate/reinforcement_q_learning.htm
 """
 
 import json
-import logging
 import math
 import random
 import time
@@ -21,11 +20,11 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 from git import Repo
-from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.conf import constants
 from surround.conf.constants import GAME_COL_SLICE, GAME_ROW_SLICE
+from surround.utils.callbacks import TBMetricsCallback, make_tb_writer
 from surround.utils.checkpoint import load_checkpoint, save_checkpoint
 from surround.utils.env_state import step_until_new_frame
 from surround.utils.video_extract_locations import get_location, observation_to_class_map
@@ -193,21 +192,8 @@ class DQNTrainer:
             )
         print(f"Saving checkpoint and run information to {constants.DQN_LOG_DIR}")
         self._run_metadata = _get_run_metadata()
-        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        self.writer = SummaryWriter(log_dir=str(constants.DQN_LOG_DIR))
-        self.writer.add_custom_scalars(
-            {
-                "episode/steps_survived_by_outcome": {
-                    "steps_survived": [
-                        "Multiline",
-                        [
-                            "episode/steps_survived_win",
-                            "episode/steps_survived_loss",
-                        ],
-                    ]
-                }
-            }
-        )
+        self.writer = make_tb_writer(constants.DQN_LOG_DIR)
+        self.cb = TBMetricsCallback(self.writer, self.n_actions)
 
     def _preprocess_observation(
         self, observation: np.ndarray, last_action: int = 1
@@ -239,15 +225,17 @@ class DQNTrainer:
         x = torch.from_numpy(arr).to(self.device)
         return x.unsqueeze(0).unsqueeze(0)
 
-    def _select_action(self, state: torch.Tensor) -> torch.Tensor:
-        sample = random.random()
-        if sample > self._current_epsilon:
-            with torch.no_grad():
-                return self.policy_net(state).max(1).indices.view(1, 1)
-        return torch.tensor(
-            [[random.randrange(self.n_actions)]],
-            device=self.device,
-            dtype=torch.long,
+    def _select_action(self, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (action, q_values). Q-values are always computed for metrics."""
+        with torch.no_grad():
+            q_values = self.policy_net(state)
+        if random.random() > self._current_epsilon:
+            return q_values.max(1).indices.view(1, 1), q_values
+        return (
+            torch.tensor(
+                [[random.randrange(self.n_actions)]], device=self.device, dtype=torch.long
+            ),
+            q_values,
         )
 
     def _optimize_model(self) -> dict[str, float] | None:
@@ -369,7 +357,7 @@ class DQNTrainer:
             episode_grad_norms: list[float] = []
 
             for t in trange(constants.MAX_CYCLES, leave=False):
-                action = self._select_action(state)
+                action, q_values = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = step_until_new_frame(
                     self.env, last_pos, action_id
@@ -390,6 +378,7 @@ class DQNTrainer:
                     )
 
                 self.memory.append(Transition(state, action, next_state, reward_t))
+                self.cb.on_step(action.item(), q_values)
                 state = next_state
                 last_action = action_id
 
@@ -407,46 +396,23 @@ class DQNTrainer:
                     self.episode_durations.append(steps_survived)
                     elapsed = time.perf_counter() - episode_start_time
                     steps_per_second = steps_survived / elapsed if elapsed > 0 else 0.0
-                    self.writer.add_scalar(
-                        "episode/steps_per_second", steps_per_second, episode_index
-                    )
-                    self.writer.add_scalar("episode/steps_survived", steps_survived, episode_index)
-                    self.writer.add_scalar(
-                        "episode/terminal_reward", terminal_reward, episode_index
-                    )
-                    self.writer.add_scalar(
-                        "episode/steps_survived_win",
-                        steps_survived if terminal_reward > 0 else float("nan"),
-                        episode_index,
-                    )
-                    self.writer.add_scalar(
-                        "episode/steps_survived_loss",
-                        steps_survived if terminal_reward < 0 else float("nan"),
-                        episode_index,
-                    )
-                    self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
+                    avg_train_metrics = None
                     if episode_losses:
                         n = len(episode_losses)
-                        self.writer.add_scalar(
-                            "episode/mean_huber_loss",
-                            sum(episode_losses) / n,
-                            episode_index,
-                        )
-                        self.writer.add_scalar(
-                            "episode/mean_td_error",
-                            sum(episode_td_errors) / n,
-                            episode_index,
-                        )
-                        self.writer.add_scalar(
-                            "episode/mean_q",
-                            sum(episode_q_means) / n,
-                            episode_index,
-                        )
-                        self.writer.add_scalar(
-                            "episode/mean_grad_norm",
-                            sum(episode_grad_norms) / n,
-                            episode_index,
-                        )
+                        avg_train_metrics = {
+                            "loss": sum(episode_losses) / n,
+                            "td_error": sum(episode_td_errors) / n,
+                            "q_mean": sum(episode_q_means) / n,
+                            "grad_norm": sum(episode_grad_norms) / n,
+                        }
+                    self.cb.on_episode_end(
+                        episode_index,
+                        steps_survived,
+                        terminal_reward,
+                        self._current_epsilon,
+                        steps_per_second,
+                        avg_train_metrics,
+                    )
                     if steps_survived > self.best_steps_survived:
                         self.best_steps_survived = steps_survived
                         save_checkpoint(
@@ -463,7 +429,7 @@ class DQNTrainer:
                     break
             if video_writer is not None:
                 video_writer.close()
-        self.writer.close()
+        self.cb.on_train_end()
         print("Training complete!")
 
 

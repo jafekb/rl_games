@@ -11,7 +11,6 @@ Log dir: runs/surround/d3qn/d3qn/
 
 import collections
 import json
-import logging
 import math
 import random
 import time
@@ -25,10 +24,10 @@ import gymnasium as gym
 import numpy as np
 import torch
 from git import Repo
-from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from surround.conf import constants
+from surround.utils.callbacks import TBMetricsCallback, make_tb_writer
 from surround.utils.checkpoint import save_checkpoint
 from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
@@ -132,16 +131,26 @@ class DuelingDQN(torch.nn.Module):
         self.adv1 = torch.nn.Linear(flat_size, 256)
         self.adv2 = torch.nn.Linear(256, n_actions)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def _backbone(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.nn.functional.relu(self.conv1(x))
         x = torch.nn.functional.relu(self.conv2(x))
         x = torch.nn.functional.relu(self.conv3(x))
-        x = x.view(x.size(0), -1)
-        v = torch.nn.functional.relu(self.val1(x))
-        v = self.val2(v)
-        a = torch.nn.functional.relu(self.adv1(x))
-        a = self.adv2(a)
+        return x.view(x.size(0), -1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self._backbone(x)
+        v = self.val2(torch.nn.functional.relu(self.val1(x)))
+        a = self.adv2(torch.nn.functional.relu(self.adv1(x)))
         return v + a - a.mean(dim=1, keepdim=True)
+
+    def forward_with_streams(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return (q, value_stream, advantage) for metrics logging."""
+        x = self._backbone(x)
+        v = self.val2(torch.nn.functional.relu(self.val1(x)))
+        a = self.adv2(torch.nn.functional.relu(self.adv1(x)))
+        return v + a - a.mean(dim=1, keepdim=True), v, a
 
 
 # ---------------------------------------------------------------------------
@@ -275,18 +284,8 @@ class D3QNTrainer:
                 f"Log dir already exists: {constants.D3QN_LOG_DIR}. Remove it before a fresh run."
             )
         print(f"Saving checkpoint and run information to {constants.D3QN_LOG_DIR}")
-        logging.getLogger("tensorboardX").setLevel(logging.ERROR)
-        self.writer = SummaryWriter(log_dir=str(constants.D3QN_LOG_DIR))
-        self.writer.add_custom_scalars(
-            {
-                "episode/steps_survived_by_outcome": {
-                    "steps_survived": [
-                        "Multiline",
-                        ["episode/steps_survived_win", "episode/steps_survived_loss"],
-                    ],
-                },
-            }
-        )
+        self.writer = make_tb_writer(constants.D3QN_LOG_DIR)
+        self.cb = TBMetricsCallback(self.writer, self.n_actions)
 
     # -- observation preprocessing ------------------------------------------
 
@@ -302,14 +301,21 @@ class D3QNTrainer:
 
     # -- action selection ---------------------------------------------------
 
-    def _select_action(self, state: torch.Tensor) -> torch.Tensor:
+    def _select_action(
+        self, state: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return (action, q_values, value_stream, advantages)."""
+        with torch.no_grad():
+            q, v, a = self.policy_net.forward_with_streams(state)
         if random.random() > self._current_epsilon:
-            with torch.no_grad():
-                return self.policy_net(state).max(1).indices.view(1, 1)
-        return torch.tensor(
-            [[random.randrange(self.n_actions)]],
-            device=self.device,
-            dtype=torch.long,
+            return q.max(1).indices.view(1, 1), q, v, a
+        return (
+            torch.tensor(
+                [[random.randrange(self.n_actions)]], device=self.device, dtype=torch.long
+            ),
+            q,
+            v,
+            a,
         )
 
     # -- Double DQN optimization with n-step bootstrap ----------------------
@@ -431,7 +437,7 @@ class D3QNTrainer:
             episode_grad_norms: list[float] = []
 
             for t in trange(constants.MAX_CYCLES, leave=False):
-                action = self._select_action(state)
+                action, q_values, v_stream, adv_values = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = _step_until_new_frame(
                     self.env, last_pos, action_id
@@ -449,6 +455,9 @@ class D3QNTrainer:
                 ):
                     self.memory.add(t_ready)
 
+                self.cb.on_step(
+                    action.item(), q_values, value_stream=v_stream, adv_values=adv_values
+                )
                 state = next_state
                 self._total_env_steps += 1
 
@@ -466,44 +475,23 @@ class D3QNTrainer:
                     steps_survived = t + 1
                     elapsed = time.perf_counter() - episode_start_time
                     sps = steps_survived / elapsed if elapsed > 0 else 0.0
-
-                    self.writer.add_scalar("episode/steps_per_second", sps, episode_index)
-                    self.writer.add_scalar("episode/steps_survived", steps_survived, episode_index)
-                    self.writer.add_scalar(
-                        "episode/terminal_reward", terminal_reward, episode_index
-                    )
-                    if terminal_reward > 0:
-                        self.writer.add_scalar(
-                            "episode/steps_survived_win", steps_survived, episode_index
-                        )
-                    elif terminal_reward < 0:
-                        self.writer.add_scalar(
-                            "episode/steps_survived_loss", steps_survived, episode_index
-                        )
-                    self.writer.add_scalar("episode/epsilon", self._current_epsilon, episode_index)
-
+                    avg_train_metrics = None
                     if episode_losses:
                         n = len(episode_losses)
-                        self.writer.add_scalar(
-                            "episode/mean_huber_loss",
-                            sum(episode_losses) / n,
-                            episode_index,
-                        )
-                        self.writer.add_scalar(
-                            "episode/mean_td_error",
-                            sum(episode_td_errors) / n,
-                            episode_index,
-                        )
-                        self.writer.add_scalar(
-                            "episode/mean_q",
-                            sum(episode_q_means) / n,
-                            episode_index,
-                        )
-                        self.writer.add_scalar(
-                            "episode/mean_grad_norm",
-                            sum(episode_grad_norms) / n,
-                            episode_index,
-                        )
+                        avg_train_metrics = {
+                            "loss": sum(episode_losses) / n,
+                            "td_error": sum(episode_td_errors) / n,
+                            "q_mean": sum(episode_q_means) / n,
+                            "grad_norm": sum(episode_grad_norms) / n,
+                        }
+                    self.cb.on_episode_end(
+                        episode_index,
+                        steps_survived,
+                        terminal_reward,
+                        self._current_epsilon,
+                        sps,
+                        avg_train_metrics,
+                    )
 
                     if steps_survived > self.best_steps_survived:
                         self.best_steps_survived = steps_survived
@@ -521,7 +509,7 @@ class D3QNTrainer:
                     self._save_checkpoint(episode_index, steps_survived=steps_survived)
                     break
 
-        self.writer.close()
+        self.cb.on_train_end()
         print("Training complete!")
 
 
