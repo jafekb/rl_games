@@ -1,31 +1,8 @@
 """Surround game and training configuration constants."""
 
-from dataclasses import dataclass
 from pathlib import Path
 
-
-@dataclass(frozen=True)
-class CheckpointPaths:
-    """Checkpoint file paths derived from a training log directory."""
-
-    log_dir: Path
-
-    @property
-    def dir(self) -> Path:
-        return self.log_dir / "checkpoints"
-
-    @property
-    def latest(self) -> Path:
-        return self.dir / "policy_latest.pt"
-
-    @property
-    def best(self) -> Path:
-        return self.dir / "policy_best.pt"
-
-    @property
-    def metadata(self) -> Path:
-        return self.dir / "metadata.json"
-
+from surround.utils.checkpoint import CheckpointPaths
 
 # Game / simulation
 GRID_ROWS = 18
