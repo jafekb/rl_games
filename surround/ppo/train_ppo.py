@@ -61,7 +61,7 @@ class PPO:
         action_dim: int,
         *,
         lr: float = constants.PPO_LR,
-        gamma: float = constants.PPO_GAMMA,
+        gamma: float = constants.GAMMA,
         eps_clip: float = constants.PPO_EPS_CLIP,
         epochs: int = constants.PPO_EPOCHS,
         device: torch.device | None = None,
@@ -217,7 +217,7 @@ class PPOTrainer:
         constants.PPO_CHECKPOINT_METADATA.write_text(
             json.dumps(json_meta, indent=2), encoding="utf-8"
         )
-        if ep % constants.PPO_CHECKPOINT_INTERVAL == 0:
+        if ep % constants.CHECKPOINT_INTERVAL == 0:
             path = constants.PPO_CHECKPOINT_DIR / f"policy_{ep:04d}.pt"
             save_checkpoint(
                 path,

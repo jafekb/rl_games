@@ -272,8 +272,8 @@ class D3QNTrainer:
         self.optimizer = torch.optim.AdamW(
             self.policy_net.parameters(), lr=constants.D3QN_LR, amsgrad=True
         )
-        self.memory = UniformReplayMemory(capacity=constants.D3QN_MEMORY_CAPACITY)
-        self.n_step_buf = NStepBuffer(n=constants.D3QN_N_STEP, gamma=constants.D3QN_GAMMA)
+        self.memory = UniformReplayMemory(capacity=constants.MEMORY_CAPACITY)
+        self.n_step_buf = NStepBuffer(n=constants.D3QN_N_STEP, gamma=constants.GAMMA)
 
         self.best_steps_survived = 0
         self._total_env_steps = 0
@@ -324,7 +324,7 @@ class D3QNTrainer:
         if len(self.memory) < constants.D3QN_LEARNING_STARTS:
             return None
 
-        transitions = self.memory.sample(constants.D3QN_BATCH_SIZE)
+        transitions = self.memory.sample(constants.BATCH_SIZE)
         batch = Transition(*zip(*transitions))
 
         non_final_mask = torch.tensor(
@@ -340,7 +340,7 @@ class D3QNTrainer:
 
         # Double DQN: policy net selects action, target net evaluates.
         # Bootstrap coefficient is gamma^n (reward_batch already holds n-step return).
-        next_state_values = torch.zeros(constants.D3QN_BATCH_SIZE, device=self.device)
+        next_state_values = torch.zeros(constants.BATCH_SIZE, device=self.device)
         if non_final_mask.any():
             non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
             with torch.no_grad():
@@ -349,7 +349,7 @@ class D3QNTrainer:
                     self.target_net(non_final_next_states).gather(1, best_actions).squeeze(1)
                 )
 
-        gamma_n = constants.D3QN_GAMMA**constants.D3QN_N_STEP
+        gamma_n = constants.GAMMA**constants.D3QN_N_STEP
         expected = (next_state_values * gamma_n) + reward_batch
         loss = torch.nn.functional.smooth_l1_loss(state_action_values, expected.unsqueeze(1))
 
@@ -377,7 +377,7 @@ class D3QNTrainer:
         target = self.target_net.state_dict()
         policy = self.policy_net.state_dict()
         for key in policy:
-            target[key] = policy[key] * constants.D3QN_TAU + target[key] * (1 - constants.D3QN_TAU)
+            target[key] = policy[key] * constants.TAU + target[key] * (1 - constants.TAU)
         self.target_net.load_state_dict(target)
 
     # -- checkpointing ------------------------------------------------------
@@ -404,7 +404,7 @@ class D3QNTrainer:
         constants.D3QN_CHECKPOINT_METADATA.write_text(
             json.dumps(json_meta, indent=2), encoding="utf-8"
         )
-        if ep % constants.D3QN_CHECKPOINT_INTERVAL == 0:
+        if ep % constants.CHECKPOINT_INTERVAL == 0:
             path = constants.D3QN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
             save_checkpoint(
                 path, self.policy_net.state_dict(), steps_survived=steps_survived, **meta
@@ -413,13 +413,13 @@ class D3QNTrainer:
     # -- main training loop -------------------------------------------------
 
     def run(self) -> None:
-        for episode_index in trange(constants.D3QN_NUM_EPISODES):
+        for episode_index in trange(constants.NUM_EPISODES):
             self._current_epsilon = epsilon_for_episode(
                 episode_index,
-                constants.D3QN_NUM_EPISODES,
-                constants.D3QN_EPS_DECAY_FRACTION,
-                constants.D3QN_EPS_START,
-                constants.D3QN_EPS_END,
+                constants.NUM_EPISODES,
+                constants.EPS_DECAY_FRACTION,
+                constants.EPS_START,
+                constants.EPS_END,
             )
 
             observation, _info = self.env.reset()

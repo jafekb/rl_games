@@ -260,7 +260,7 @@ class DQNTrainer:
         next_state_values = torch.zeros(constants.BATCH_SIZE, device=self.device)
         with torch.no_grad():
             next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(1).values
-        expected_state_action_values = (next_state_values * constants.GAMMA_DQN) + reward_batch
+        expected_state_action_values = (next_state_values * constants.GAMMA) + reward_batch
 
         criterion = torch.nn.SmoothL1Loss()
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
@@ -310,7 +310,7 @@ class DQNTrainer:
         constants.DQN_CHECKPOINT_METADATA.write_text(
             json.dumps(json_meta, indent=2), encoding="utf-8"
         )
-        if ep % constants.DQN_CHECKPOINT_INTERVAL == 0:
+        if ep % constants.CHECKPOINT_INTERVAL == 0:
             path = constants.DQN_CHECKPOINT_DIR / f"policy_net_{ep:04d}.pt"
             save_checkpoint(
                 path, self.policy_net.state_dict(), steps_survived=steps_survived, **meta
