@@ -227,7 +227,7 @@ class PPOTrainer:
             )
 
     def run(self) -> None:
-        """Run the PPO training loop until PPO_NUM_EPISODES."""
+        """Run the PPO training loop until NUM_EPISODES."""
         memory: dict = {
             "states": [],
             "actions": [],
@@ -237,7 +237,7 @@ class PPOTrainer:
         }
         timestep = 0
 
-        for episode_index in trange(constants.PPO_NUM_EPISODES):
+        for episode_index in trange(constants.NUM_EPISODES):
             observation, _ = self.env.reset()
             last_action = ACTION_WORD_TO_ID["LEFT"]
             last_pos = {
