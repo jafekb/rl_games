@@ -185,7 +185,8 @@ class DQNTrainer:
         )
         self.memory: deque = deque(maxlen=constants.MEMORY_CAPACITY)
         self.episode_durations: list[int] = []
-        self.best_steps_survived = 0
+        self._recent_outcomes: deque = deque(maxlen=100)
+        self.best_win_rate = 0.0
         if constants.DQN_LOG_DIR.exists():
             raise FileExistsError(
                 f"Log dir already exists: {constants.DQN_LOG_DIR}. Remove it before a fresh run."
@@ -303,9 +304,7 @@ class DQNTrainer:
             **meta,
         )
         json_meta = (
-            {**meta, "best_steps_survived": self.best_steps_survived}
-            if self.best_steps_survived > 0
-            else meta
+            {**meta, "best_win_rate": self.best_win_rate} if self.best_win_rate > 0 else meta
         )
         constants.DQN_CKPT.metadata.write_text(json.dumps(json_meta, indent=2), encoding="utf-8")
         if ep % constants.CHECKPOINT_INTERVAL == 0:
@@ -411,8 +410,10 @@ class DQNTrainer:
                         steps_per_second,
                         avg_train_metrics,
                     )
-                    if steps_survived > self.best_steps_survived:
-                        self.best_steps_survived = steps_survived
+                    self._recent_outcomes.append(terminal_reward > 0)
+                    win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
+                    if win_rate > self.best_win_rate:
+                        self.best_win_rate = win_rate
                         save_checkpoint(
                             constants.DQN_CKPT.best,
                             self.policy_net.state_dict(),

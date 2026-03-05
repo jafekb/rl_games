@@ -275,7 +275,8 @@ class D3QNTrainer:
         self.memory = UniformReplayMemory(capacity=constants.D3QN_MEMORY_CAPACITY)
         self.n_step_buf = NStepBuffer(n=constants.D3QN_N_STEP, gamma=constants.GAMMA)
 
-        self.best_steps_survived = 0
+        self._recent_outcomes: collections.deque = collections.deque(maxlen=100)
+        self.best_win_rate = 0.0
         self._total_env_steps = 0
         self._run_metadata = _get_run_metadata()
 
@@ -397,9 +398,7 @@ class D3QNTrainer:
             **meta,
         )
         json_meta = (
-            {**meta, "best_steps_survived": self.best_steps_survived}
-            if self.best_steps_survived > 0
-            else meta
+            {**meta, "best_win_rate": self.best_win_rate} if self.best_win_rate > 0 else meta
         )
         constants.D3QN_CKPT.metadata.write_text(json.dumps(json_meta, indent=2), encoding="utf-8")
         if ep % constants.CHECKPOINT_INTERVAL == 0:
@@ -491,8 +490,10 @@ class D3QNTrainer:
                         avg_train_metrics,
                     )
 
-                    if steps_survived > self.best_steps_survived:
-                        self.best_steps_survived = steps_survived
+                    self._recent_outcomes.append(terminal_reward > 0)
+                    win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
+                    if win_rate > self.best_win_rate:
+                        self.best_win_rate = win_rate
                         save_checkpoint(
                             constants.D3QN_CKPT.best,
                             self.policy_net.state_dict(),
