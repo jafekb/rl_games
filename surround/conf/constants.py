@@ -73,6 +73,7 @@ PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 # Hyperparameters reflect best-performing config (exp6).
 # exp6 changes vs exp5: larger replay buffer (100K), slower eps decay (0.05),
 # larger batch (256), proportionally larger learning_starts (5K).
+# exp8: resume exp7 weights on difficulty=0, fresh epsilon to escape local optima.
 D3QN_LR = 1e-4
 D3QN_N_STEP = 10
 D3QN_LEARNING_STARTS = 5_000
@@ -80,6 +81,7 @@ D3QN_UPDATE_EVERY = 4
 D3QN_MEMORY_CAPACITY = 100_000
 D3QN_BATCH_SIZE = 256
 D3QN_EPS_DECAY_FRACTION = 0.05
-D3QN_LOG_DIR = Path("runs/surround/d3qn/exp7")
+D3QN_LOG_DIR = Path("runs/surround/d3qn/exp8")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
-D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp6")
+D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp7")
+D3QN_FRESH_EPSILON: bool = True  # Reset epsilon schedule independent of episode offset
