@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from statistics import mean, median, pstdev
+from statistics import mean, pstdev
 
 import imageio.v2 as imageio
 from tqdm import trange
@@ -70,7 +70,6 @@ def summarize(returns):
     return {
         "mean": mean(returns),
         "std": pstdev(returns) if n > 1 else 0.0,
-        "median": median(returns),
         "my_points": my_points,
         "opp_points": opp_points,
         "point_win_pct": 100.0 * my_points / (my_points + opp_points),
@@ -138,7 +137,7 @@ def main() -> None:
         s = stats
         print(
             f"{name_label}: "
-            f"mean={s['mean']:.2f} std={s['std']:.2f} median={s['median']:.2f} | "
+            f"mean={s['mean']:.2f} std={s['std']:.2f} | "
             f"points W/L={s['my_points']}/{s['opp_points']} ({s['point_win_pct']:.1f}%)"
         )
 
