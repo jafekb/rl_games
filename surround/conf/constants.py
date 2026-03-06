@@ -76,6 +76,8 @@ D3QN_BATCH_SIZE = 256
 D3QN_EPS_DECAY_FRACTION = 0.05
 D3QN_LOG_DIR = Path("runs/surround/d3qn/exp10")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
-D3QN_RESUME_FROM: Path | None = None
-D3QN_FRESH_EPSILON: bool = False
+D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp9")
+D3QN_FRESH_EPSILON: bool = (
+    True  # Reset epsilon; training distribution changes with random difficulty
+)
 D3QN_RANDOM_DIFFICULTY: bool = True  # Randomize difficulty {0,1,2,3} each episode
