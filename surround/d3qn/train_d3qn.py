@@ -525,5 +525,43 @@ class D3QNTrainer:
         print("Training complete!")
 
 
+# ---------------------------------------------------------------------------
+# Greedy policy for benchmark
+# ---------------------------------------------------------------------------
+
+_D3QN_POLICY_NET_CACHE: DuelingDQN | None = None
+_D3QN_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _load_d3qn_policy_net() -> DuelingDQN:
+    global _D3QN_POLICY_NET_CACHE
+    if _D3QN_POLICY_NET_CACHE is None:
+        ckpt_path = constants.D3QN_CKPT.latest
+        if not ckpt_path.exists():
+            raise FileNotFoundError(f"D3QN checkpoint not found: {ckpt_path}. Run training first.")
+        state_dict, _ = load_checkpoint(ckpt_path, map_location=_D3QN_DEVICE)
+        net = DuelingDQN(constants.N_ACTIONS).to(_D3QN_DEVICE)
+        net.load_state_dict(state_dict)
+        net.eval()
+        _D3QN_POLICY_NET_CACHE = net
+    return _D3QN_POLICY_NET_CACHE
+
+
+def greedy_d3qn_policy(action_space, observation, info, last_action):
+    """Greedy policy using the latest saved D3QN weights."""
+    net = _load_d3qn_policy_net()
+    class_map = observation_to_class_map(observation)
+    class_map = _resize_to_preprocess(class_map)
+    x = (
+        torch.from_numpy(class_map.astype(np.float32) / 3.0)
+        .to(_D3QN_DEVICE)
+        .unsqueeze(0)
+        .unsqueeze(0)
+    )
+    with torch.no_grad():
+        action_index = int(net(x).max(1).indices.item())
+    return action_index + 1  # env action 1..4
+
+
 if __name__ == "__main__":
     D3QNTrainer().run()
