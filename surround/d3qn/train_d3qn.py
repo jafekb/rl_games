@@ -310,8 +310,8 @@ class D3QNTrainer:
         return _resize_to_preprocess(class_map)
 
     def _to_tensor(self, preprocessed: np.ndarray) -> torch.Tensor:
-        """(H, W) uint8 -> (1, 1, H, W) float32 tensor on device, normalized to [0, 1]."""
-        arr = np.asarray(preprocessed, dtype=np.float32) / 3.0
+        """(H, W) float32 -> (1, 1, H, W) float32 tensor on device."""
+        arr = np.asarray(preprocessed, dtype=np.float32)
         return torch.from_numpy(arr).to(self.device).unsqueeze(0).unsqueeze(0)
 
     # -- action selection ---------------------------------------------------
@@ -556,12 +556,7 @@ def greedy_d3qn_policy(action_space, observation, info, last_action):
     net = _load_d3qn_policy_net()
     class_map = observation_to_class_map(observation)
     class_map = _resize_to_preprocess(class_map)
-    x = (
-        torch.from_numpy(class_map.astype(np.float32) / 3.0)
-        .to(_D3QN_DEVICE)
-        .unsqueeze(0)
-        .unsqueeze(0)
-    )
+    x = torch.from_numpy(class_map).to(_D3QN_DEVICE).unsqueeze(0).unsqueeze(0)
     with torch.no_grad():
         action_index = int(net(x).max(1).indices.item())
     return action_index + 1  # env action 1..4

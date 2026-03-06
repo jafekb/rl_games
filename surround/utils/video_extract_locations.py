@@ -85,7 +85,8 @@ def observation_to_class_map(observation: np.ndarray) -> np.ndarray:
         observation: Grayscale image from the env, shape (height, width).
 
     Returns:
-        (H, W) array, dtype uint8, values in {0, 1, 2, 3}.
+        (H, W) array, dtype float32, values in {0, 1/3, 2/3, 1} for
+        {empty, wall, opponent, ego}.
     """
     assert observation.ndim == 2, "Observation must be grayscale (H, W)."
     game = observation[constants.GAME_ROW_SLICE, constants.GAME_COL_SLICE]
@@ -93,7 +94,7 @@ def observation_to_class_map(observation: np.ndarray) -> np.ndarray:
     out[game == WALLS_GRAY] = 1
     out[game == OPP_GRAY] = 2
     out[game == EGO_GRAY] = 3
-    return out
+    return out.astype(np.float32) / 3.0
 
 
 def main(images: list[Path]) -> None:
