@@ -36,7 +36,6 @@ Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 QL_LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
-# Input type: "state_tuple" (7-tuple -> MLP), "grayscale" (CNN), "class_map" (4-class CNN)
 DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
 EPS_START = 0.9
@@ -61,7 +60,7 @@ PPO_LR = 3e-4
 PPO_EPS_CLIP = 0.2
 PPO_EPOCHS = 10
 PPO_ENTROPY_COEF = 0.02
-PPO_GRAD_CLIP = 0  # 0 = disabled; use 0.5 for extra stability if needed
+PPO_GRAD_CLIP = 0
 PPO_UPDATE_TIMESTEP = 2000
 PPO_LOG_DIR = Path("runs/surround/ppo/rollout2000_2k_ep")
 PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
@@ -77,7 +76,5 @@ D3QN_EPS_DECAY_FRACTION = 0.05
 D3QN_LOG_DIR = Path("runs/surround/d3qn/exp10")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
 D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp9")
-D3QN_FRESH_EPSILON: bool = (
-    True  # Reset epsilon; training distribution changes with random difficulty
-)
-D3QN_RANDOM_DIFFICULTY: bool = True  # Randomize difficulty {0,1,2,3} each episode
+D3QN_FRESH_EPSILON: bool = True
+D3QN_RANDOM_DIFFICULTY: bool = True
