@@ -36,10 +36,7 @@ Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 QL_LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
-# Input type:
-#     - "state_tuple": 7-tuple -> MLP
-#     - "grayscale": image -> CNN
-#     - "class_map": 4-class map -> CNN, exp11
+# Input type: "state_tuple" (7-tuple -> MLP), "grayscale" (CNN), "class_map" (4-class CNN)
 DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
 EPS_START = 0.9
@@ -70,11 +67,6 @@ PPO_LOG_DIR = Path("runs/surround/ppo/rollout2000_2k_ep")
 PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 
 # D3QN (Dueling Double DQN, uniform replay, n-step returns)
-# Hyperparameters reflect best-performing config (exp6).
-# exp6 changes vs exp5: larger replay buffer (100K), slower eps decay (0.05),
-# larger batch (256), proportionally larger learning_starts (5K).
-# exp9: resume exp7 weights on difficulty=1, fresh epsilon to adapt to harder opponent.
-# exp10: fresh run, random difficulty {0,1,2,3} each episode for opponent generalization.
 D3QN_LR = 1e-4
 D3QN_N_STEP = 10
 D3QN_LEARNING_STARTS = 5_000
