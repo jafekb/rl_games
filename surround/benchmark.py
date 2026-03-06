@@ -12,13 +12,13 @@ if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from surround import constants
-from surround.d3qn.train_d3qn import greedy_d3qn_policy
-from surround.dqn.train_dqn import greedy_dqn_policy
+from surround.d3qn.train_d3qn import _step_until_new_frame, greedy_d3qn_policy
 from surround.utils.env_state import make_env
+from surround.utils.video_extract_locations import get_location
 
 ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
 MAX_CYCLES = 100_000
-EPISODES = 10
+EPISODES = 20
 RECORD_VIDEO = True
 VIDEO_DIR = Path("video")
 VIDEO_FPS = 120
@@ -28,7 +28,7 @@ FRAME_STRIDE = 4
 POLICIES = {
     # "random": random_policy,
     # "human": get_human_action,
-    "dqn": greedy_dqn_policy,
+    # "dqn": greedy_dqn_policy,
     "d3qn": greedy_d3qn_policy,
     # "q_learning": greedy_q_policy,
     # "snake": snake_policy,
@@ -39,19 +39,22 @@ def run_episode(env, policy, seed, video_writer, episode_index: int):
     observation, info = env.reset(seed=seed)
     total = 0.0
     last_action = 1
+    last_pos = get_location(observation)
     for cycle_step in trange(
         MAX_CYCLES,
         desc=f"Episode {episode_index + 1}/{EPISODES}",
         leave=False,
     ):
         action = policy(env.action_space, observation, info, last_action)
-        observation, reward, terminated, truncated, info = env.step(action)
+        observation, reward, terminated, truncated, info = _step_until_new_frame(
+            env, last_pos, action
+        )
+        last_pos = info["location"]
         total += reward
         if video_writer is not None and cycle_step % FRAME_STRIDE == 0:
             frame = env.render()
             if frame is not None:
                 video_writer.append_data(frame)
-            # imageio.imwrite(f"video/frame_{cycle_step:04d}.png", frame)
 
         if terminated or truncated:
             break
@@ -60,9 +63,16 @@ def run_episode(env, policy, seed, video_writer, episode_index: int):
 
 
 def summarize(returns):
+    n = len(returns)
+    # Each game goes to 10 points; return is point differential (mine - opp)
+    my_points = sum(10 if r >= 0 else 10 + r for r in returns)
+    opp_points = sum(10 - r if r >= 0 else 10 for r in returns)
     return {
         "mean": mean(returns),
-        "std": pstdev(returns) if len(returns) > 1 else 0.0,
+        "std": pstdev(returns) if n > 1 else 0.0,
+        "my_points": my_points,
+        "opp_points": opp_points,
+        "point_win_pct": 100.0 * my_points / (my_points + opp_points),
     }
 
 
@@ -103,7 +113,7 @@ def main() -> None:
                 total = run_episode(
                     env,
                     policy,
-                    seed=constants.SEED + episode,
+                    seed=None,
                     video_writer=video_writer,
                     episode_index=episode,
                 )
@@ -124,7 +134,12 @@ def main() -> None:
             name_label = f"{policy_name} ({d3qn_episodes} episodes)"
         else:
             name_label = policy_name
-        print(f"{name_label}: mean_return={stats['mean']:.2f} std={stats['std']:.2f}")
+        s = stats
+        print(
+            f"{name_label}: "
+            f"mean={s['mean']:.2f} std={s['std']:.2f} | "
+            f"points W/L={s['my_points']}/{s['opp_points']} ({s['point_win_pct']:.1f}%)"
+        )
 
 
 if __name__ == "__main__":
