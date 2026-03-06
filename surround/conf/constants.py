@@ -74,6 +74,7 @@ PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 # exp6 changes vs exp5: larger replay buffer (100K), slower eps decay (0.05),
 # larger batch (256), proportionally larger learning_starts (5K).
 # exp9: resume exp7 weights on difficulty=1, fresh epsilon to adapt to harder opponent.
+# exp10: fresh run, random difficulty {0,1,2,3} each episode for opponent generalization.
 D3QN_LR = 1e-4
 D3QN_N_STEP = 10
 D3QN_LEARNING_STARTS = 5_000
@@ -81,7 +82,8 @@ D3QN_UPDATE_EVERY = 4
 D3QN_MEMORY_CAPACITY = 100_000
 D3QN_BATCH_SIZE = 256
 D3QN_EPS_DECAY_FRACTION = 0.05
-D3QN_LOG_DIR = Path("runs/surround/d3qn/exp9")
+D3QN_LOG_DIR = Path("runs/surround/d3qn/exp10")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
-D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp7")
-D3QN_FRESH_EPSILON: bool = True  # Reset epsilon schedule independent of episode offset
+D3QN_RESUME_FROM: Path | None = None
+D3QN_FRESH_EPSILON: bool = False
+D3QN_RANDOM_DIFFICULTY: bool = True  # Randomize difficulty {0,1,2,3} each episode
