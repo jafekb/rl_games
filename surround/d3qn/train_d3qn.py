@@ -275,6 +275,10 @@ class D3QNTrainer:
             self.policy_net.load_state_dict(state_dict)
             self._episode_offset = int(meta.get("episodes_completed", 0))
             print(f"Resumed from {resume_ckpt} (episodes_completed={self._episode_offset})")
+        # Fresh epsilon: restart exploration from ep 0 regardless of how many episodes
+        # have already been trained. The loaded weights are kept; only epsilon is reset.
+        fresh_eps = getattr(constants, "D3QN_FRESH_EPSILON", False)
+        self._eps_offset = 0 if fresh_eps else self._episode_offset
 
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
@@ -420,10 +424,10 @@ class D3QNTrainer:
     # -- main training loop -------------------------------------------------
 
     def run(self) -> None:
-        total_episodes = constants.NUM_EPISODES + self._episode_offset
+        total_episodes = constants.NUM_EPISODES + self._eps_offset
         for episode_index in trange(constants.NUM_EPISODES):
             self._current_epsilon = epsilon_for_episode(
-                episode_index + self._episode_offset,
+                episode_index + self._eps_offset,
                 total_episodes,
                 constants.D3QN_EPS_DECAY_FRACTION,
                 constants.EPS_START,
