@@ -28,7 +28,7 @@ from tqdm import trange
 
 from surround.conf import constants
 from surround.utils.callbacks import TBMetricsCallback, make_tb_writer
-from surround.utils.checkpoint import save_checkpoint
+from surround.utils.checkpoint import CheckpointPaths, load_checkpoint, save_checkpoint
 from surround.utils.video_extract_locations import get_location, observation_to_class_map
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -266,6 +266,16 @@ class D3QNTrainer:
 
         self.policy_net = DuelingDQN(self.n_actions).to(self.device)
         self.target_net = DuelingDQN(self.n_actions).to(self.device)
+
+        self._episode_offset = 0
+        resume_log_dir = constants.D3QN_RESUME_FROM
+        if resume_log_dir is not None:
+            resume_ckpt = CheckpointPaths(resume_log_dir).latest
+            state_dict, meta = load_checkpoint(resume_ckpt, map_location=self.device)
+            self.policy_net.load_state_dict(state_dict)
+            self._episode_offset = int(meta.get("episodes_completed", 0))
+            print(f"Resumed from {resume_ckpt} (episodes_completed={self._episode_offset})")
+
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
@@ -410,10 +420,11 @@ class D3QNTrainer:
     # -- main training loop -------------------------------------------------
 
     def run(self) -> None:
+        total_episodes = constants.NUM_EPISODES + self._episode_offset
         for episode_index in trange(constants.NUM_EPISODES):
             self._current_epsilon = epsilon_for_episode(
-                episode_index,
-                constants.NUM_EPISODES,
+                episode_index + self._episode_offset,
+                total_episodes,
                 constants.D3QN_EPS_DECAY_FRACTION,
                 constants.EPS_START,
                 constants.EPS_END,
@@ -482,7 +493,7 @@ class D3QNTrainer:
                             "grad_norm": sum(episode_grad_norms) / n,
                         }
                     self.cb.on_episode_end(
-                        episode_index,
+                        episode_index + self._episode_offset,
                         steps_survived,
                         terminal_reward,
                         self._current_epsilon,
@@ -500,12 +511,14 @@ class D3QNTrainer:
                             steps_survived=steps_survived,
                             **{
                                 **self._run_metadata,
-                                "episodes_completed": episode_index + 1,
+                                "episodes_completed": episode_index + self._episode_offset + 1,
                                 "algorithm": "d3qn",
                                 "dqn_state_type": "class_map",
                             },
                         )
-                    self._save_checkpoint(episode_index, steps_survived=steps_survived)
+                    self._save_checkpoint(
+                        episode_index + self._episode_offset, steps_survived=steps_survived
+                    )
                     break
 
         self.cb.on_train_end()
