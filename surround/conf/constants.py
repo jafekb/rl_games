@@ -36,10 +36,6 @@ Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 QL_LOG_DIR = Path("runs/surround/ql_visits")
 
 # DQN
-# Input type:
-#     - "state_tuple": 7-tuple -> MLP
-#     - "grayscale": image -> CNN
-#     - "class_map": 4-class map -> CNN, exp11
 DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
 EPS_START = 0.9
@@ -64,16 +60,12 @@ PPO_LR = 3e-4
 PPO_EPS_CLIP = 0.2
 PPO_EPOCHS = 10
 PPO_ENTROPY_COEF = 0.02
-PPO_GRAD_CLIP = 0  # 0 = disabled; use 0.5 for extra stability if needed
+PPO_GRAD_CLIP = 0
 PPO_UPDATE_TIMESTEP = 2000
 PPO_LOG_DIR = Path("runs/surround/ppo/rollout2000_2k_ep")
 PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 
 # D3QN (Dueling Double DQN, uniform replay, n-step returns)
-# Hyperparameters reflect best-performing config (exp6).
-# exp6 changes vs exp5: larger replay buffer (100K), slower eps decay (0.05),
-# larger batch (256), proportionally larger learning_starts (5K).
-# exp9: resume exp7 weights on difficulty=1, fresh epsilon to adapt to harder opponent.
 D3QN_LR = 1e-4
 D3QN_N_STEP = 10
 D3QN_LEARNING_STARTS = 5_000
@@ -81,7 +73,8 @@ D3QN_UPDATE_EVERY = 4
 D3QN_MEMORY_CAPACITY = 100_000
 D3QN_BATCH_SIZE = 256
 D3QN_EPS_DECAY_FRACTION = 0.05
-D3QN_LOG_DIR = Path("runs/surround/d3qn/exp9")
+D3QN_LOG_DIR = Path("runs/surround/d3qn/exp10")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
-D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp7")
-D3QN_FRESH_EPSILON: bool = True  # Reset epsilon schedule independent of episode offset
+D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp9")
+D3QN_FRESH_EPSILON: bool = True
+D3QN_RANDOM_DIFFICULTY: bool = True

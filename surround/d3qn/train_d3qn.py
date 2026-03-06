@@ -254,6 +254,7 @@ class D3QNTrainer:
     def __init__(self) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         gym.register_envs(ale_py)
+        self._random_difficulty: bool = getattr(constants, "D3QN_RANDOM_DIFFICULTY", False)
         self.env = gym.make(
             "ALE/Surround-v5",
             obs_type="grayscale",
@@ -434,6 +435,8 @@ class D3QNTrainer:
                 constants.EPS_END,
             )
 
+            if self._random_difficulty:
+                self.env.unwrapped.ale.setDifficulty(np.random.randint(0, 4))
             observation, _info = self.env.reset()
             last_pos = {
                 "ego": get_location(observation)["ego"],
