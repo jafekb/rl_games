@@ -536,7 +536,7 @@ _D3QN_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def _load_d3qn_policy_net() -> DuelingDQN:
     global _D3QN_POLICY_NET_CACHE
     if _D3QN_POLICY_NET_CACHE is None:
-        ckpt_path = constants.D3QN_CKPT.latest
+        ckpt_path = constants.D3QN_CKPT.best
         if not ckpt_path.exists():
             raise FileNotFoundError(f"D3QN checkpoint not found: {ckpt_path}. Run training first.")
         state_dict, _ = load_checkpoint(ckpt_path, map_location=_D3QN_DEVICE)
