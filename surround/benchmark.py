@@ -12,6 +12,7 @@ if __package__ is None:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from surround import constants
+from surround.d3qn.train_d3qn import greedy_d3qn_policy
 from surround.dqn.train_dqn import greedy_dqn_policy
 from surround.utils.env_state import make_env
 
@@ -28,6 +29,7 @@ POLICIES = {
     # "random": random_policy,
     # "human": get_human_action,
     "dqn": greedy_dqn_policy,
+    "d3qn": greedy_d3qn_policy,
     # "q_learning": greedy_q_policy,
     # "snake": snake_policy,
 }
@@ -75,6 +77,7 @@ def main() -> None:
         results = {}
         q_table_episodes = None
         dqn_episodes = None
+        d3qn_episodes = None
         if constants.Q_TABLE_PATH.exists():
             data = json.loads(constants.Q_TABLE_PATH.read_text(encoding="utf-8"))
             analysis = data.get("analysis", {})
@@ -82,6 +85,9 @@ def main() -> None:
         if constants.DQN_CKPT.metadata.exists():
             dqn_meta = json.loads(constants.DQN_CKPT.metadata.read_text(encoding="utf-8"))
             dqn_episodes = dqn_meta.get("episodes_completed")
+        if constants.D3QN_CKPT.metadata.exists():
+            d3qn_meta = json.loads(constants.D3QN_CKPT.metadata.read_text(encoding="utf-8"))
+            d3qn_episodes = d3qn_meta.get("episodes_completed")
         for policy_name, policy in POLICIES.items():
             video_writer = None
             if RECORD_VIDEO:
@@ -114,6 +120,8 @@ def main() -> None:
             name_label = f"{policy_name} ({q_table_episodes} episodes)"
         elif policy_name == "dqn" and dqn_episodes is not None:
             name_label = f"{policy_name} ({dqn_episodes} episodes)"
+        elif policy_name == "d3qn" and d3qn_episodes is not None:
+            name_label = f"{policy_name} ({d3qn_episodes} episodes)"
         else:
             name_label = policy_name
         print(f"{name_label}: mean_return={stats['mean']:.2f} std={stats['std']:.2f}")
