@@ -88,6 +88,20 @@ def epsilon_for_episode(
     return eps_end + (eps_start - eps_end) * math.exp(-episode_index / (decay_episodes / 3))
 
 
+def _episode_for_epsilon(
+    target: float,
+    num_episodes: int,
+    decay_fraction: float,
+    eps_start: float,
+    eps_end: float,
+) -> int:
+    """Inverse of epsilon_for_episode: returns the episode index that yields target epsilon."""
+    decay_episodes = max(1, int(num_episodes * decay_fraction))
+    ratio = (target - eps_end) / (eps_start - eps_end)
+    ratio = max(1e-9, min(1.0 - 1e-9, ratio))
+    return int(-(decay_episodes / 3) * math.log(ratio))
+
+
 # ---------------------------------------------------------------------------
 # Network helpers
 # ---------------------------------------------------------------------------
@@ -254,6 +268,12 @@ class D3QNTrainer:
     def __init__(self) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         gym.register_envs(ale_py)
+        self._curriculum_phases: list[list[int]] | None = getattr(
+            constants, "D3QN_CURRICULUM_PHASES", None
+        )
+        self._curriculum_threshold: float = getattr(constants, "D3QN_CURRICULUM_THRESHOLD", 0.65)
+        self._curriculum_phase_idx = 0
+        self._phase_outcomes: collections.deque = collections.deque(maxlen=100)
         self.env = gym.make(
             "ALE/Surround-v5",
             obs_type="grayscale",
@@ -279,6 +299,7 @@ class D3QNTrainer:
         # have already been trained. The loaded weights are kept; only epsilon is reset.
         fresh_eps = getattr(constants, "D3QN_FRESH_EPSILON", False)
         self._eps_offset = 0 if fresh_eps else self._episode_offset
+        self._total_episodes = constants.NUM_EPISODES + self._eps_offset
 
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
@@ -424,16 +445,42 @@ class D3QNTrainer:
     # -- main training loop -------------------------------------------------
 
     def run(self) -> None:
-        total_episodes = constants.NUM_EPISODES + self._eps_offset
         for episode_index in trange(constants.NUM_EPISODES):
             self._current_epsilon = epsilon_for_episode(
                 episode_index + self._eps_offset,
-                total_episodes,
+                self._total_episodes,
                 constants.D3QN_EPS_DECAY_FRACTION,
                 constants.EPS_START,
                 constants.EPS_END,
             )
 
+            if self._curriculum_phases is not None:
+                phase_diffs = self._curriculum_phases[self._curriculum_phase_idx]
+                if (
+                    self._curriculum_phase_idx < len(self._curriculum_phases) - 1
+                    and len(self._phase_outcomes) == self._phase_outcomes.maxlen
+                    and sum(self._phase_outcomes) / len(self._phase_outcomes)
+                    >= self._curriculum_threshold
+                ):
+                    self._curriculum_phase_idx += 1
+                    self._phase_outcomes.clear()
+                    phase_diffs = self._curriculum_phases[self._curriculum_phase_idx]
+                    phase_eps = getattr(constants, "D3QN_CURRICULUM_PHASE_EPS", None)
+                    if phase_eps is not None:
+                        eff_ep = _episode_for_epsilon(
+                            phase_eps,
+                            self._total_episodes,
+                            constants.D3QN_EPS_DECAY_FRACTION,
+                            constants.EPS_START,
+                            constants.EPS_END,
+                        )
+                        self._eps_offset = eff_ep - episode_index
+                    print(
+                        f"\nCurriculum: advancing to phase {self._curriculum_phase_idx}: "
+                        f"difficulties={phase_diffs}"
+                        + (f"  epsilon -> {phase_eps}" if phase_eps is not None else "")
+                    )
+                self.env.unwrapped.ale.setDifficulty(random.choice(phase_diffs))
             observation, _info = self.env.reset()
             last_pos = {
                 "ego": get_location(observation)["ego"],
@@ -506,6 +553,13 @@ class D3QNTrainer:
                     )
 
                     self._recent_outcomes.append(terminal_reward > 0)
+                    if self._curriculum_phases is not None:
+                        self._phase_outcomes.append(terminal_reward > 0)
+                        self.writer.add_scalar(
+                            "curriculum/phase",
+                            self._curriculum_phase_idx,
+                            episode_index + self._episode_offset,
+                        )
                     win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
                     if win_rate > self.best_win_rate:
                         self.best_win_rate = win_rate
