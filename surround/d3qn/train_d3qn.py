@@ -254,7 +254,12 @@ class D3QNTrainer:
     def __init__(self) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         gym.register_envs(ale_py)
-        self._random_difficulty: bool = getattr(constants, "D3QN_RANDOM_DIFFICULTY", False)
+        self._curriculum_phases: list[list[int]] | None = getattr(
+            constants, "D3QN_CURRICULUM_PHASES", None
+        )
+        self._curriculum_threshold: float = getattr(constants, "D3QN_CURRICULUM_THRESHOLD", 0.65)
+        self._curriculum_phase_idx = 0
+        self._phase_outcomes: collections.deque = collections.deque(maxlen=100)
         self.env = gym.make(
             "ALE/Surround-v5",
             obs_type="grayscale",
@@ -435,8 +440,22 @@ class D3QNTrainer:
                 constants.EPS_END,
             )
 
-            if self._random_difficulty:
-                self.env.unwrapped.ale.setDifficulty(np.random.randint(0, 4))
+            if self._curriculum_phases is not None:
+                phase_diffs = self._curriculum_phases[self._curriculum_phase_idx]
+                if (
+                    self._curriculum_phase_idx < len(self._curriculum_phases) - 1
+                    and len(self._phase_outcomes) == self._phase_outcomes.maxlen
+                    and sum(self._phase_outcomes) / len(self._phase_outcomes)
+                    >= self._curriculum_threshold
+                ):
+                    self._curriculum_phase_idx += 1
+                    self._phase_outcomes.clear()
+                    phase_diffs = self._curriculum_phases[self._curriculum_phase_idx]
+                    print(
+                        f"\nCurriculum: advancing to phase {self._curriculum_phase_idx}: "
+                        f"difficulties={phase_diffs}"
+                    )
+                self.env.unwrapped.ale.setDifficulty(random.choice(phase_diffs))
             observation, _info = self.env.reset()
             last_pos = {
                 "ego": get_location(observation)["ego"],
@@ -509,6 +528,13 @@ class D3QNTrainer:
                     )
 
                     self._recent_outcomes.append(terminal_reward > 0)
+                    if self._curriculum_phases is not None:
+                        self._phase_outcomes.append(terminal_reward > 0)
+                        self.writer.add_scalar(
+                            "curriculum/phase",
+                            self._curriculum_phase_idx,
+                            episode_index + self._episode_offset,
+                        )
                     win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
                     if win_rate > self.best_win_rate:
                         self.best_win_rate = win_rate
