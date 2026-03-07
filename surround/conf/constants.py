@@ -77,5 +77,5 @@ D3QN_LOG_DIR = Path("runs/surround/d3qn/exp11")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
 D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp9")
 D3QN_FRESH_EPSILON: bool = True
-D3QN_CURRICULUM_PHASES: list[list[int]] = [[1], [0, 1, 2], [0, 1, 2, 3]]
+D3QN_CURRICULUM_PHASES: list[list[int]] = [[1], [1, 2], [2], [2, 3], [1, 2, 3], [0, 1, 2, 3]]
 D3QN_CURRICULUM_THRESHOLD: float = 0.65
