@@ -43,6 +43,7 @@ from surround.utils.video_extract_locations import (
     EGO_GRAY,
     OPP_GRAY,
     WALLS_GRAY,
+    get_location,
     observation_to_class_map,
 )
 
@@ -72,6 +73,73 @@ def _observation_to_class_map_second(observation: np.ndarray) -> np.ndarray:
 def _resize_to_preprocess(arr: np.ndarray) -> np.ndarray:
     h, w = constants.DQN_PREPROCESS_HEIGHT, constants.DQN_PREPROCESS_WIDTH
     return cv2.resize(arr, (w, h), interpolation=cv2.INTER_NEAREST)
+
+
+# ---------------------------------------------------------------------------
+# Parallel env stepping helper
+# ---------------------------------------------------------------------------
+
+
+def _step_until_new_frame_parallel(
+    env,
+    last_pos: dict,
+    action_first: int,
+    action_second: int,
+    max_substeps: int = 20,
+) -> tuple[dict, float, dict, dict, dict]:
+    """Step parallel env until both player positions change (or episode ends).
+
+    Mirrors _step_until_new_frame from d3qn/train_d3qn.py for the PettingZoo
+    parallel API. Both agents repeat their chosen actions on each substep.
+    Only the learner's (first_0) reward is accumulated and returned.
+
+    Returns (obs, learner_reward, terminations, truncations, info) where
+    info["location"] holds the updated {"ego", "opp"} position dict derived
+    from first_0's global frame.
+    """
+    total_reward = 0.0
+    obs: dict = {}
+    terminations: dict = {}
+    truncations: dict = {}
+    locs: dict = {"ego": None, "opp": None}
+
+    for _ in range(max_substeps):
+        actions = {}
+        if "first_0" in env.agents:
+            actions["first_0"] = action_first
+        if "second_0" in env.agents:
+            actions["second_0"] = action_second
+
+        obs, rewards, terminations, truncations, _ = env.step(actions)
+        total_reward += rewards.get("first_0", 0.0)
+
+        # Both players share the same global frame; use first_0's view for positions.
+        frame = obs.get("first_0", obs.get("second_0"))
+        if frame is not None:
+            locs = get_location(frame.squeeze(-1))
+
+        if locs["ego"] is None or locs["opp"] is None:
+            continue
+
+        done = (
+            terminations.get("first_0", False)
+            or truncations.get("first_0", False)
+            or abs(total_reward) == 1
+            or not env.agents
+        )
+        if done:
+            break
+
+        if (
+            last_pos.get("ego") is None
+            or last_pos.get("opp") is None
+            or locs["ego"] != last_pos["ego"]
+            or locs["opp"] != last_pos["opp"]
+        ):
+            break
+
+    info = {"location": {"ego": locs["ego"], "opp": locs["opp"]}}
+    return obs, total_reward, terminations, truncations, info
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +372,11 @@ class SelfPlayTrainer:
             self._opponent_episodes_remaining -= 1
 
             obs, _ = self.env.reset()
+            first_frame = obs["first_0"].squeeze(-1)
+            last_pos = {
+                "ego": get_location(first_frame)["ego"],
+                "opp": get_location(first_frame)["opp"],
+            }
             learner_state = self._preprocess_first(obs["first_0"])
             opp_state = self._preprocess_second(obs["second_0"])
 
@@ -323,20 +396,17 @@ class SelfPlayTrainer:
                 with torch.no_grad():
                     opp_action_id = self.opponent_net(opp_state).max(1).indices.item() + 1
 
-                actions = {}
-                if "first_0" in self.env.agents:
-                    actions["first_0"] = learner_action_id
-                if "second_0" in self.env.agents:
-                    actions["second_0"] = opp_action_id
+                obs, learner_reward, terminations, truncations, _info = (
+                    _step_until_new_frame_parallel(
+                        self.env, last_pos, learner_action_id, opp_action_id
+                    )
+                )
+                last_pos = _info["location"]
 
-                obs, rewards, terminations, truncations, _infos = self.env.step(actions)
-
-                learner_reward = rewards.get("first_0", 0.0)
                 learner_terminated = terminations.get("first_0", False)
-                learner_truncated = truncations.get("first_0", False)
                 done = (
                     learner_terminated
-                    or learner_truncated
+                    or truncations.get("first_0", False)
                     or abs(learner_reward) == 1
                     or not self.env.agents
                 )
