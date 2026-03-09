@@ -1,14 +1,16 @@
 """Opponent pool for self-play training.
 
-Scans a set of directories for past policy checkpoints and provides uniform
-random sampling. New snapshots from the current training run are added to the
-pool as training progresses (fictitious self-play).
+Scans a set of directories for past policy checkpoints and provides
+steps_survived-weighted random sampling. Better opponents (higher
+steps_survived) are sampled more often, so opponent quality naturally
+increases as the learner improves and adds stronger snapshots to the pool.
 """
 
 import random
 from pathlib import Path
 
 import torch
+from tqdm import tqdm
 
 from surround.utils.checkpoint import load_checkpoint, save_checkpoint
 
@@ -16,12 +18,10 @@ from surround.utils.checkpoint import load_checkpoint, save_checkpoint
 class OpponentPool:
     """Pool of past policy checkpoints for self-play opponent sampling.
 
-    Checkpoints are discovered lazily: file paths are collected at init, but
-    state dicts are only loaded when sample() is called. This keeps startup fast
-    even with thousands of checkpoints on disk.
-
-    Only checkpoints whose metadata reports steps_survived >= min_steps are
-    returned by sample(); others are silently skipped.
+    At init, all checkpoint files in the scan dirs are loaded (metadata only
+    kept in memory) to build a steps_survived-weighted sampling distribution.
+    On each sample() call a path is drawn proportional to its steps_survived,
+    then the state dict is loaded from disk.
     """
 
     def __init__(
@@ -35,34 +35,37 @@ class OpponentPool:
         self._device = device
         self._pool_save_dir = pool_save_dir
 
-        self._paths: list[Path] = []
-        for d in scan_dirs:
-            self._paths.extend(Path(d).rglob("*.pt"))
-        random.shuffle(self._paths)
-        print(f"OpponentPool: {len(self._paths)} checkpoint files found in scan dirs")
+        all_paths = [p for d in scan_dirs for p in Path(d).rglob("*.pt")]
+        print(f"OpponentPool: scanning {len(all_paths)} checkpoints...")
 
-    def sample(self, max_tries: int = 30) -> tuple[dict, int] | None:
-        """Return (state_dict, steps_survived) for a random qualifying checkpoint.
-
-        Returns None if no qualifying checkpoint is found within max_tries.
-        """
-        if not self._paths:
-            return None
-        candidates = random.sample(self._paths, min(max_tries, len(self._paths)))
-        for path in candidates:
-            state_dict, meta = load_checkpoint(path, map_location=self._device)
+        self._pool: list[tuple[Path, int]] = []  # (path, steps_survived)
+        for path in tqdm(all_paths, desc="OpponentPool scan", leave=False):
+            _, meta = load_checkpoint(path, map_location="cpu")
             steps = meta.get("steps_survived", 0)
-            if steps >= self._min_steps:
-                return state_dict, steps
-        return None
+            if steps >= min_steps:
+                self._pool.append((path, steps))
+
+        print(f"OpponentPool: {len(self._pool)} qualifying checkpoints (min_steps={min_steps})")
+
+    def sample(self) -> tuple[dict, int] | None:
+        """Return (state_dict, steps_survived) sampled proportional to steps_survived.
+
+        Returns None if the pool is empty.
+        """
+        if not self._pool:
+            return None
+        weights = [s for _, s in self._pool]
+        ((path, steps_survived),) = random.choices(self._pool, weights=weights, k=1)
+        state_dict, _ = load_checkpoint(path, map_location=self._device)
+        return state_dict, steps_survived
 
     def add(self, state_dict: dict, episode: int, steps_survived: int) -> None:
         """Save a snapshot of the current policy and register it in the pool."""
         self._pool_save_dir.mkdir(parents=True, exist_ok=True)
         path = self._pool_save_dir / f"pool_{episode:06d}.pt"
         save_checkpoint(path, state_dict, steps_survived=steps_survived)
-        self._paths.append(path)
+        self._pool.append((path, steps_survived))
 
     @property
     def size(self) -> int:
-        return len(self._paths)
+        return len(self._pool)
