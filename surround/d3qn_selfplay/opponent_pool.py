@@ -34,7 +34,6 @@ class OpponentPool:
         self._min_steps = min_steps
         self._device = device
         self._pool_save_dir = pool_save_dir
-        self._pool_save_dir.mkdir(parents=True, exist_ok=True)
 
         self._paths: list[Path] = []
         for d in scan_dirs:
@@ -55,6 +54,7 @@ class OpponentPool:
 
     def add(self, state_dict: dict, episode: int, steps_survived: int) -> None:
         """Save a snapshot of the current policy and register it in the pool."""
+        self._pool_save_dir.mkdir(parents=True, exist_ok=True)
         path = self._pool_save_dir / f"pool_{episode:06d}.pt"
         save_checkpoint(path, state_dict, steps_survived=steps_survived)
         self._paths.append(path)
