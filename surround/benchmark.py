@@ -16,7 +16,7 @@ from surround.d3qn.train_d3qn import _step_until_new_frame, greedy_d3qn_policy
 from surround.utils.env_state import make_env
 from surround.utils.video_extract_locations import get_location
 
-ROM_PATH = str(Path("~/.local/share/AutoROM/roms").expanduser())
+ROM_PATH = str(constants.ROM_PATH)
 MAX_CYCLES = 100_000
 EPISODES = 20
 RECORD_VIDEO = True
