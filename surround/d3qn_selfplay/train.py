@@ -104,6 +104,9 @@ def _step_until_new_frame_parallel(
     locs: dict = {"ego": None, "opp": None}
 
     for _ in range(max_substeps):
+        if not env.agents:
+            break
+
         actions = {}
         if "first_0" in env.agents:
             actions["first_0"] = action_first
@@ -118,9 +121,6 @@ def _step_until_new_frame_parallel(
         if frame is not None:
             locs = get_location(frame.squeeze(-1))
 
-        if locs["ego"] is None or locs["opp"] is None:
-            continue
-
         done = (
             terminations.get("first_0", False)
             or truncations.get("first_0", False)
@@ -129,6 +129,9 @@ def _step_until_new_frame_parallel(
         )
         if done:
             break
+
+        if locs["ego"] is None or locs["opp"] is None:
+            continue
 
         if (
             last_pos.get("ego") is None
