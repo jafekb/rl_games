@@ -48,12 +48,9 @@ class OpponentPool:
             return None
         candidates = random.sample(self._paths, min(max_tries, len(self._paths)))
         for path in candidates:
-            try:
-                state_dict, meta = load_checkpoint(path, map_location=self._device)
-                if meta.get("steps_survived", 0) >= self._min_steps:
-                    return state_dict
-            except Exception:
-                continue
+            state_dict, meta = load_checkpoint(path, map_location=self._device)
+            if meta.get("steps_survived", 0) >= self._min_steps:
+                return state_dict
         return None
 
     def add(self, state_dict: dict, episode: int, steps_survived: int) -> None:
