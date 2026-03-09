@@ -21,6 +21,7 @@ dependencies = [
     "tensorboardX",
     "torch>=2.0.0",
     "tqdm>=4.67.3",
+    "pettingzoo[atari]>=1.24",
 ]
 
 [project.optional-dependencies]

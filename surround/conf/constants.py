@@ -31,6 +31,9 @@ STEP_REWARD = 0.01
 STATE_MODE = "state_tuple"
 WINDOW_SIZE = 7
 
+# ROM
+ROM_PATH = Path("~/.local/share/AutoROM/roms").expanduser()
+
 # Paths (Q-learning)
 Q_TABLE_PATH = Path("surround/q_learning/q_table.json")
 QL_LOG_DIR = Path("runs/surround/ql_visits")
@@ -85,3 +88,11 @@ D3QN_LOG_DIR = Path("runs/surround/d3qn/exp9")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
 D3QN_RESUME_FROM: Path | None = Path("runs/surround/d3qn/exp7")
 D3QN_FRESH_EPSILON: bool = True  # Reset epsilon schedule independent of episode offset
+
+# D3QN Self-play
+D3QN_SELFPLAY_LOG_DIR = Path("runs/surround/d3qn_selfplay/exp1")
+D3QN_SELFPLAY_CKPT = CheckpointPaths(D3QN_SELFPLAY_LOG_DIR)
+D3QN_SELFPLAY_POOL_SCAN_DIR = Path("runs/surround")
+D3QN_SELFPLAY_POOL_MIN_STEPS = 40
+D3QN_SELFPLAY_POOL_ADD_EVERY = 500
+D3QN_SELFPLAY_OPPONENT_CHANGE_EVERY = 50
