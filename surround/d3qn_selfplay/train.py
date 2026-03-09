@@ -214,6 +214,7 @@ class SelfPlayTrainer:
         self._total_env_steps = 0
         self._run_metadata = _get_run_metadata()
         self._opponent_episodes_remaining = 0  # trigger resample on first episode
+        self._opponent_steps_survived = 0
 
         if constants.D3QN_SELFPLAY_LOG_DIR.exists():
             raise FileExistsError(
@@ -258,9 +259,11 @@ class SelfPlayTrainer:
     # -- opponent management ------------------------------------------------
 
     def _resample_opponent(self) -> None:
-        state_dict = self.pool.sample()
-        if state_dict is not None:
+        result = self.pool.sample()
+        if result is not None:
+            state_dict, steps_survived = result
             self.opponent_net.load_state_dict(state_dict)
+            self._opponent_steps_survived = steps_survived
         # If pool returns None (shouldn't happen given pool size), keep current
         # opponent_net weights (random at first episode, then whatever was last set).
         self.opponent_net.eval()
@@ -464,6 +467,11 @@ class SelfPlayTrainer:
                     self._recent_outcomes.append(terminal_reward > 0)
                     win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
                     self.writer.add_scalar("selfplay/pool_size", self.pool.size, episode_index)
+                    self.writer.add_scalar(
+                        "selfplay/opponent_steps_survived",
+                        self._opponent_steps_survived,
+                        episode_index,
+                    )
 
                     if win_rate > self.best_win_rate:
                         self.best_win_rate = win_rate

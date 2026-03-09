@@ -41,15 +41,19 @@ class OpponentPool:
         random.shuffle(self._paths)
         print(f"OpponentPool: {len(self._paths)} checkpoint files found in scan dirs")
 
-    def sample(self, max_tries: int = 30) -> dict | None:
-        """Return a random qualifying state dict, or None if none can be found."""
+    def sample(self, max_tries: int = 30) -> tuple[dict, int] | None:
+        """Return (state_dict, steps_survived) for a random qualifying checkpoint.
+
+        Returns None if no qualifying checkpoint is found within max_tries.
+        """
         if not self._paths:
             return None
         candidates = random.sample(self._paths, min(max_tries, len(self._paths)))
         for path in candidates:
             state_dict, meta = load_checkpoint(path, map_location=self._device)
-            if meta.get("steps_survived", 0) >= self._min_steps:
-                return state_dict
+            steps = meta.get("steps_survived", 0)
+            if steps >= self._min_steps:
+                return state_dict, steps
         return None
 
     def add(self, state_dict: dict, episode: int, steps_survived: int) -> None:
