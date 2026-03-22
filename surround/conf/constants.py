@@ -42,7 +42,7 @@ QL_LOG_DIR = Path("runs/surround/ql_visits")
 #     - "class_map": 4-class map -> CNN, exp11
 DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
-EPS_START = 0.9
+EPS_START = 0.05  # fine-tuning: low exploration to preserve learned policy
 EPS_END = 0.01
 EPS_DECAY_FRACTION = 0.01
 TAU = 0.005
@@ -72,7 +72,7 @@ PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 # D3QN (Dueling Double DQN, uniform replay, n-step returns)
 # Autoresearch baseline — best-performing hyperparams from exp6.
 # The agent may modify any of these constants.
-D3QN_LR = 1e-4
+D3QN_LR = 3e-5  # fine-tuning: small steps to avoid overwriting exp9 policy
 D3QN_N_STEP = 10
 D3QN_LEARNING_STARTS = 5_000
 D3QN_UPDATE_EVERY = 4
