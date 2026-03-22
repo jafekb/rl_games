@@ -33,6 +33,11 @@ from surround.utils.video_extract_locations import get_location, observation_to_
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
+# ---------------------------------------------------------------------------
+# Training time budget (do not modify — fixed by the autoresearch harness)
+# ---------------------------------------------------------------------------
+
+TRAIN_TIME_BUDGET = 1200  # wall-clock seconds (20 minutes)
 
 # ---------------------------------------------------------------------------
 # Env stepping helper
@@ -424,7 +429,13 @@ class D3QNTrainer:
     # -- main training loop -------------------------------------------------
 
     def run(self) -> None:
+        import shutil
+
+        t_train_start = time.time()
         total_episodes = constants.NUM_EPISODES + self._eps_offset
+        budget_exceeded = False
+        episode_index = 0
+
         for episode_index in trange(constants.NUM_EPISODES):
             self._current_epsilon = epsilon_for_episode(
                 episode_index + self._eps_offset,
@@ -523,10 +534,29 @@ class D3QNTrainer:
                     self._save_checkpoint(
                         episode_index + self._episode_offset, steps_survived=steps_survived
                     )
+                    if time.time() - t_train_start >= TRAIN_TIME_BUDGET:
+                        budget_exceeded = True
                     break
 
+            if budget_exceeded:
+                break
+
+        training_seconds = time.time() - t_train_start
+        episodes_completed = episode_index + 1 + self._episode_offset
+
+        # Ensure policy_best.pt always exists so the benchmark can load it.
+        # If the agent never won, copy the latest checkpoint as best.
+        if not constants.D3QN_CKPT.best.exists() and constants.D3QN_CKPT.latest.exists():
+            shutil.copy(constants.D3QN_CKPT.latest, constants.D3QN_CKPT.best)
+
         self.cb.on_train_end()
-        print("Training complete!")
+        stop_reason = "time_budget" if budget_exceeded else "episodes"
+        print(
+            f"\nTraining complete ({stop_reason}): "
+            f"episodes={episodes_completed} | "
+            f"training_seconds={training_seconds:.1f} | "
+            f"best_win_rate={self.best_win_rate:.3f}"
+        )
 
 
 # ---------------------------------------------------------------------------
