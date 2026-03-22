@@ -434,6 +434,13 @@ class D3QNTrainer:
                 constants.EPS_END,
             )
 
+            episode_difficulty = constants.DIFFICULTY
+            if getattr(constants, "D3QN_DIFFICULTY_CHOICES", None):
+                episode_difficulty = random.choices(
+                    constants.D3QN_DIFFICULTY_CHOICES,
+                    weights=constants.D3QN_DIFFICULTY_WEIGHTS,
+                )[0]
+                self.env.unwrapped.ale.setDifficulty(episode_difficulty)
             observation, _info = self.env.reset()
             last_pos = {
                 "ego": get_location(observation)["ego"],
@@ -504,6 +511,8 @@ class D3QNTrainer:
                         sps,
                         avg_train_metrics,
                     )
+                    global_ep = episode_index + self._episode_offset
+                    self.writer.add_scalar("episode/difficulty", episode_difficulty, global_ep)
 
                     self._recent_outcomes.append(terminal_reward > 0)
                     win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
