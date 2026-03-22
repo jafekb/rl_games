@@ -73,7 +73,7 @@ PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 # Autoresearch baseline — best-performing hyperparams from exp6.
 # The agent may modify any of these constants.
 D3QN_LR = 3e-5  # fine-tuning: small steps to avoid overwriting exp9 policy
-D3QN_N_STEP = 10
+D3QN_N_STEP = 3
 D3QN_LEARNING_STARTS = 5_000
 D3QN_UPDATE_EVERY = 4
 D3QN_MEMORY_CAPACITY = 100_000
