@@ -23,11 +23,18 @@ To set up a new experiment session, work with the user to:
 - `surround/conf/constants.py` — any D3QN hyperparameters: LR, batch size, memory capacity, n-step, update frequency, epsilon decay, gamma, tau, etc.
 
 **What you CANNOT modify:**
-- `run_experiment.py` — the fixed harness. It defines the time budget, runs the benchmark, and prints the metric.
+- `run_experiment.py` — the fixed harness. It manages the best/ checkpoint, defines the time budget, runs the benchmark, and prints the metric.
 - `TRAIN_TIME_BUDGET` in `train_d3qn.py` — this constant is fixed at 1200 seconds.
+- `D3QN_RESUME_FROM` and `D3QN_LOG_DIR` in `constants.py` — managed by the harness.
 - `surround/utils/` — environment utilities, observation preprocessing, checkpointing.
 - `surround/benchmark.py` — separate benchmark script (unused by the harness).
 - Do not install new packages.
+
+## Checkpoint strategy
+
+Each experiment **resumes from the best saved checkpoint** (seeded from `runs/surround/d3qn/exp9` on the first run). `run_experiment.py` manages a stable `runs/surround/autoresearch/best/` directory — if the new run scores higher than the previous best, the checkpoint is automatically updated. You never touch this logic.
+
+The starting point (exp9) already achieves ~89.7% point_win_pct on difficulty=1 after 146K episodes of training. The goal is to push beyond this.
 
 ## The metric
 
@@ -39,7 +46,7 @@ Each Surround game goes to 10 points (first to trap the opponent). The benchmark
 point_win_pct = 100 * my_points / (my_points + opp_points)
 ```
 
-50% = even. Baseline (random init, 20 min of training) will be near 50% or below. Anything above 50% is the agent learning to play.
+Baseline (exp9 weights, difficulty=1): **~89.7%**. The goal is to exceed this.
 
 ## Running an experiment
 

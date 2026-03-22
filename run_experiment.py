@@ -1,8 +1,9 @@
 """
 Autoresearch experiment harness for Surround D3QN.
 
-Clears the previous run, trains for TRAIN_TIME_BUDGET seconds (defined in
-train_d3qn.py), then runs a fixed benchmark and prints a clean summary.
+Resumes training from the best checkpoint (seeded from exp9 on first run),
+trains for TRAIN_TIME_BUDGET seconds, benchmarks, then updates the best
+checkpoint if the result improved.
 
 Usage:
     python run_experiment.py > run.log 2>&1
@@ -13,25 +14,53 @@ Extract the key metric:
 Do NOT modify this file — it is the fixed evaluation harness.
 """
 
+import json
 import math
 import shutil
 import time
+from pathlib import Path
 
 import torch
 
 # ---------------------------------------------------------------------------
-# Benchmark config (fixed — do not modify)
+# Config (fixed — do not modify)
 # ---------------------------------------------------------------------------
 
 BENCHMARK_EPISODES = 30
+EXP9_DIR = Path("runs/surround/d3qn/exp9")
+BEST_DIR = Path("runs/surround/autoresearch/best")
+BEST_RESULT_PATH = BEST_DIR / "best_result.json"
 
 # ---------------------------------------------------------------------------
-# Clear previous run dir before importing the trainer
-# (D3QNTrainer raises FileExistsError if the log dir already exists)
+# Bootstrap best/ dir from exp9 on first run
+# ---------------------------------------------------------------------------
+
+if not BEST_DIR.exists():
+    print(f"Initializing best checkpoint from {EXP9_DIR} ...")
+    ckpt_dir = BEST_DIR / "checkpoints"
+    ckpt_dir.mkdir(parents=True)
+    for fname in ["policy_best.pt", "policy_latest.pt", "metadata.json"]:
+        src = EXP9_DIR / "checkpoints" / fname
+        if src.exists():
+            shutil.copy(src, ckpt_dir / fname)
+    # Seed best_result.json with exp9's known benchmark score
+    BEST_RESULT_PATH.write_text(json.dumps({"point_win_pct": 0.0, "source": "exp9_init"}))
+    print("Initialized.")
+
+prev_best_win_pct = json.loads(BEST_RESULT_PATH.read_text()).get("point_win_pct", 0.0)
+
+# ---------------------------------------------------------------------------
+# Patch constants so the trainer resumes from best/ with fresh epsilon
+# (must happen before importing D3QNTrainer)
 # ---------------------------------------------------------------------------
 
 from surround.conf import constants  # noqa: E402
 
+constants.D3QN_RESUME_FROM = BEST_DIR
+constants.D3QN_FRESH_EPSILON = True  # always restart exploration from eps_start
+
+# Clear current run dir
+# (D3QNTrainer raises FileExistsError if the log dir already exists)
 if constants.D3QN_LOG_DIR.exists():
     shutil.rmtree(constants.D3QN_LOG_DIR)
 
@@ -60,7 +89,7 @@ trainer.run()
 training_seconds = time.time() - t_total_start
 
 # ---------------------------------------------------------------------------
-# Benchmark (greedy policy, no video)
+# Benchmark (greedy policy from best checkpoint of this run, no video)
 # ---------------------------------------------------------------------------
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -106,8 +135,17 @@ std_ret = math.sqrt(sum((r - mean_ret) ** 2 for r in returns) / n)
 total_seconds = time.time() - t_total_start
 peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024 if torch.cuda.is_available() else 0.0
 
+# Update best checkpoint if this run improved
+if point_win_pct > prev_best_win_pct:
+    ckpt_dir = BEST_DIR / "checkpoints"
+    shutil.rmtree(ckpt_dir, ignore_errors=True)
+    shutil.copytree(constants.D3QN_CKPT.dir, ckpt_dir)
+    BEST_RESULT_PATH.write_text(json.dumps({"point_win_pct": point_win_pct}))
+    print(f"New best checkpoint saved ({prev_best_win_pct:.2f}% -> {point_win_pct:.2f}%)")
+
 print("---")
 print(f"point_win_pct:      {point_win_pct:.2f}")
+print(f"prev_best_win_pct:  {prev_best_win_pct:.2f}")
 print(f"mean_return:        {mean_ret:.3f}")
 print(f"std_return:         {std_ret:.3f}")
 print(f"benchmark_episodes: {n}")
