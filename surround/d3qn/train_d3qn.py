@@ -518,7 +518,7 @@ class D3QNTrainer:
 
                     self._recent_outcomes.append(terminal_reward > 0)
                     win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
-                    if win_rate > self.best_win_rate:
+                    if len(self._recent_outcomes) >= 100 and win_rate > self.best_win_rate:
                         self.best_win_rate = win_rate
                         save_checkpoint(
                             constants.D3QN_CKPT.best,
