@@ -57,7 +57,8 @@ prev_best_win_pct = json.loads(BEST_RESULT_PATH.read_text()).get("point_win_pct"
 from surround.conf import constants  # noqa: E402
 
 constants.D3QN_RESUME_FROM = BEST_DIR
-constants.D3QN_FRESH_EPSILON = True  # always restart exploration from eps_start
+constants.D3QN_FRESH_EPSILON = True  # restart epsilon from eps_start each run
+constants.EPS_START = 0.15  # low exploration — fine-tune, don't overwrite
 
 # Clear current run dir
 # (D3QNTrainer raises FileExistsError if the log dir already exists)
