@@ -260,7 +260,9 @@ class D3QNTrainer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         gym.register_envs(ale_py)
         _curriculum = getattr(constants, "D3QN_CURRICULUM", False)
-        if _curriculum:
+        _multidiff = getattr(constants, "D3QN_MULTIDIFF_DIFFICULTIES", None)
+        if _curriculum or _multidiff:
+            _diffs = _multidiff if _multidiff else list(range(4))
             self._curriculum_envs = {
                 d: gym.make(
                     "ALE/Surround-v5",
@@ -270,9 +272,9 @@ class D3QNTrainer:
                     mode=constants.MODE,
                     frameskip=constants.FRAME_SKIP,
                 )
-                for d in range(4)
+                for d in _diffs
             }
-            self.env = self._curriculum_envs[0]
+            self.env = next(iter(self._curriculum_envs.values()))
         else:
             self._curriculum_envs = {}
             self.env = gym.make(
@@ -453,6 +455,7 @@ class D3QNTrainer:
         budget_exceeded = False
         episode_index = 0
 
+        _multidiff = getattr(constants, "D3QN_MULTIDIFF_DIFFICULTIES", None)
         _curriculum = getattr(constants, "D3QN_CURRICULUM", False)
         _curriculum_phases = [[0], [0, 1], [0, 1, 2], [0, 1, 2, 3]]
         _curriculum_win_threshold = 0.40
@@ -477,9 +480,10 @@ class D3QNTrainer:
                 constants.EPS_END,
             )
 
-            if _curriculum:
-                _cur_diff = random.choice(_cur_difficulties)
-                _active_env = self._curriculum_envs[_cur_diff]
+            if _multidiff:
+                _active_env = self._curriculum_envs[random.choice(_multidiff)]
+            elif _curriculum:
+                _active_env = self._curriculum_envs[random.choice(_cur_difficulties)]
             else:
                 _active_env = self.env
             observation, _info = _active_env.reset()
