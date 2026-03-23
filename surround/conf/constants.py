@@ -79,6 +79,6 @@ D3QN_UPDATE_EVERY = 4
 D3QN_MEMORY_CAPACITY = 100_000
 D3QN_BATCH_SIZE = 256
 D3QN_EPS_DECAY_FRACTION = 0.05
-D3QN_LOG_DIR = Path("runs/surround/autoresearch/current")
+D3QN_LOG_DIR = Path("runs/surround/autoresearch2/current")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
 D3QN_RESUME_FROM: Path | None = None  # always train from scratch

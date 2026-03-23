@@ -26,9 +26,10 @@ import torch
 # Config (fixed — do not modify)
 # ---------------------------------------------------------------------------
 
-BENCHMARK_EPISODES = 30
-EXP9_DIR = Path("runs/surround/d3qn/exp9")
-BEST_DIR = Path("runs/surround/autoresearch/best")
+BENCHMARK_EPISODES = 32  # 8 per difficulty (0, 1, 2, 3)
+BENCHMARK_EPISODES_PER_DIFFICULTY = BENCHMARK_EPISODES // 4
+SEED_DIR = Path("runs/surround/autoresearch/best")  # seed from autoresearch round 1 best
+BEST_DIR = Path("runs/surround/autoresearch2/best")
 BEST_RESULT_PATH = BEST_DIR / "best_result.json"
 
 # ---------------------------------------------------------------------------
@@ -36,8 +37,8 @@ BEST_RESULT_PATH = BEST_DIR / "best_result.json"
 # ---------------------------------------------------------------------------
 
 
-def _measure_exp9_baseline(ckpt_dir: Path, n_episodes: int) -> float:
-    """Benchmark exp9/policy_best.pt with fixed seeds. Returns point_win_pct."""
+def _measure_seed_baseline(ckpt_dir: Path, episodes_per_difficulty: int) -> float:
+    """Benchmark policy_best.pt across all 4 difficulties. Returns point_win_pct."""
     import torch as th
 
     from surround.conf import constants as cfg
@@ -55,42 +56,45 @@ def _measure_exp9_baseline(ckpt_dir: Path, n_episodes: int) -> float:
     net = DuelingDQN(cfg.N_ACTIONS).to(device)
     net.load_state_dict(state_dict)
     net.eval()
-    env = make_env(cfg.DIFFICULTY, cfg.MODE, frameskip=cfg.FRAME_SKIP)
     episode_returns = []
-    for ep in range(n_episodes):
-        obs, _ = env.reset(seed=ep)
-        last_pos = get_location(obs)
-        total = 0.0
-        for _ in range(cfg.MAX_CYCLES):
-            cm = _resize_to_preprocess(observation_to_class_map(obs))
-            x = th.from_numpy(cm).to(device).float().unsqueeze(0).unsqueeze(0)
-            with th.no_grad():
-                action = int(net(x).max(1).indices.item()) + 1
-            obs, reward, terminated, truncated, info = _step_until_new_frame(env, last_pos, action)
-            last_pos = info["location"]
-            total += reward
-            if terminated or truncated:
-                break
-        episode_returns.append(total)
-    env.close()
+    for difficulty in range(4):
+        env = make_env(difficulty, cfg.MODE, frameskip=cfg.FRAME_SKIP)
+        for ep in range(episodes_per_difficulty):
+            obs, _ = env.reset(seed=ep)
+            last_pos = get_location(obs)
+            total = 0.0
+            for _ in range(cfg.MAX_CYCLES):
+                cm = _resize_to_preprocess(observation_to_class_map(obs))
+                x = th.from_numpy(cm).to(device).float().unsqueeze(0).unsqueeze(0)
+                with th.no_grad():
+                    action = int(net(x).max(1).indices.item()) + 1
+                obs, reward, terminated, truncated, info = _step_until_new_frame(
+                    env, last_pos, action
+                )
+                last_pos = info["location"]
+                total += reward
+                if terminated or truncated:
+                    break
+            episode_returns.append(total)
+        env.close()
     my_pts = sum(10 if r >= 0 else 10 + r for r in episode_returns)
     opp_pts = sum((10 - r) if r >= 0 else 10 for r in episode_returns)
     return 100.0 * my_pts / (my_pts + opp_pts)
 
 
 if not BEST_DIR.exists():
-    print(f"Initializing best checkpoint from {EXP9_DIR} ...")
+    print(f"Initializing best checkpoint from {SEED_DIR} ...")
     ckpt_dir = BEST_DIR / "checkpoints"
     ckpt_dir.mkdir(parents=True)
     for fname in ["policy_best.pt", "policy_latest.pt", "metadata.json"]:
-        src = EXP9_DIR / "checkpoints" / fname
+        src = SEED_DIR / "checkpoints" / fname
         if src.exists():
             shutil.copy(src, ckpt_dir / fname)
-    print("Measuring exp9 baseline on fixed seeds ...")
-    baseline_pct = _measure_exp9_baseline(ckpt_dir, BENCHMARK_EPISODES)
-    print(f"exp9 baseline: {baseline_pct:.2f}% point_win_pct")
+    print("Measuring seed baseline across all 4 difficulties ...")
+    baseline_pct = _measure_seed_baseline(ckpt_dir, BENCHMARK_EPISODES_PER_DIFFICULTY)
+    print(f"Seed baseline: {baseline_pct:.2f}% point_win_pct")
     BEST_RESULT_PATH.write_text(
-        json.dumps({"point_win_pct": baseline_pct, "source": "exp9_measured"})
+        json.dumps({"point_win_pct": baseline_pct, "source": "autoresearch1_best"})
     )
     print("Initialized.")
 
@@ -147,28 +151,29 @@ net = DuelingDQN(constants.N_ACTIONS).to(device)
 net.load_state_dict(state_dict)
 net.eval()
 
-env = make_env(constants.DIFFICULTY, constants.MODE, frameskip=constants.FRAME_SKIP)
 returns = []
-for ep in range(BENCHMARK_EPISODES):
-    obs, info = env.reset(seed=ep)
-    last_pos = get_location(obs)
-    total = 0.0
-    last_action = 1
-    for _ in range(constants.MAX_CYCLES):
-        class_map = observation_to_class_map(obs)
-        class_map = _resize_to_preprocess(class_map)
-        x = torch.from_numpy(class_map).to(device).float().unsqueeze(0).unsqueeze(0)
-        with torch.no_grad():
-            action_index = int(net(x).max(1).indices.item())
-        action = action_index + 1  # env actions are 1..4
-        obs, reward, terminated, truncated, info = _step_until_new_frame(env, last_pos, action)
-        last_pos = info["location"]
-        total += reward
-        if terminated or truncated:
-            break
-        last_action = action
-    returns.append(total)
-env.close()
+for difficulty in range(4):
+    env = make_env(difficulty, constants.MODE, frameskip=constants.FRAME_SKIP)
+    for ep in range(BENCHMARK_EPISODES_PER_DIFFICULTY):
+        obs, info = env.reset(seed=ep)
+        last_pos = get_location(obs)
+        total = 0.0
+        last_action = 1
+        for _ in range(constants.MAX_CYCLES):
+            class_map = observation_to_class_map(obs)
+            class_map = _resize_to_preprocess(class_map)
+            x = torch.from_numpy(class_map).to(device).float().unsqueeze(0).unsqueeze(0)
+            with torch.no_grad():
+                action_index = int(net(x).max(1).indices.item())
+            action = action_index + 1  # env actions are 1..4
+            obs, reward, terminated, truncated, info = _step_until_new_frame(env, last_pos, action)
+            last_pos = info["location"]
+            total += reward
+            if terminated or truncated:
+                break
+            last_action = action
+        returns.append(total)
+    env.close()
 
 # ---------------------------------------------------------------------------
 # Summary
