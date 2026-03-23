@@ -33,6 +33,11 @@ from surround.utils.video_extract_locations import get_location, observation_to_
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
+# ---------------------------------------------------------------------------
+# Training time budget (do not modify — fixed by the autoresearch harness)
+# ---------------------------------------------------------------------------
+
+TRAIN_TIME_BUDGET = 3600  # wall-clock seconds (60 minutes)
 
 # ---------------------------------------------------------------------------
 # Env stepping helper
@@ -254,21 +259,40 @@ class D3QNTrainer:
     def __init__(self) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         gym.register_envs(ale_py)
-        self.env = gym.make(
-            "ALE/Surround-v5",
-            obs_type="grayscale",
-            full_action_space=False,
-            difficulty=constants.DIFFICULTY,
-            mode=constants.MODE,
-            frameskip=constants.FRAME_SKIP,
-        )
+        _curriculum = getattr(constants, "D3QN_CURRICULUM", False)
+        _multidiff = getattr(constants, "D3QN_MULTIDIFF_DIFFICULTIES", None)
+        if _curriculum or _multidiff:
+            _diffs = _multidiff if _multidiff else list(range(4))
+            self._curriculum_envs = {
+                d: gym.make(
+                    "ALE/Surround-v5",
+                    obs_type="grayscale",
+                    full_action_space=False,
+                    difficulty=d,
+                    mode=constants.MODE,
+                    frameskip=constants.FRAME_SKIP,
+                )
+                for d in _diffs
+            }
+            self.env = next(iter(self._curriculum_envs.values()))
+        else:
+            self._curriculum_envs = {}
+            self.env = gym.make(
+                "ALE/Surround-v5",
+                obs_type="grayscale",
+                full_action_space=False,
+                difficulty=constants.DIFFICULTY,
+                mode=constants.MODE,
+                frameskip=constants.FRAME_SKIP,
+            )
         self.n_actions = self.env.action_space.n - 1  # ignore NOOP
 
         self.policy_net = DuelingDQN(self.n_actions).to(self.device)
         self.target_net = DuelingDQN(self.n_actions).to(self.device)
 
         self._episode_offset = 0
-        resume_log_dir = constants.D3QN_RESUME_FROM
+        force_resume = getattr(constants, "D3QN_FORCE_RESUME_FROM", "UNSET")
+        resume_log_dir = force_resume if force_resume != "UNSET" else constants.D3QN_RESUME_FROM
         if resume_log_dir is not None:
             resume_ckpt = CheckpointPaths(resume_log_dir).latest
             state_dict, meta = load_checkpoint(resume_ckpt, map_location=self.device)
@@ -289,7 +313,7 @@ class D3QNTrainer:
         self.memory = UniformReplayMemory(capacity=constants.D3QN_MEMORY_CAPACITY)
         self.n_step_buf = NStepBuffer(n=constants.D3QN_N_STEP, gamma=constants.GAMMA)
 
-        self._recent_outcomes: collections.deque = collections.deque(maxlen=100)
+        self._recent_outcomes: collections.deque = collections.deque(maxlen=200)
         self.best_win_rate = 0.0
         self._total_env_steps = 0
         self._run_metadata = _get_run_metadata()
@@ -424,17 +448,45 @@ class D3QNTrainer:
     # -- main training loop -------------------------------------------------
 
     def run(self) -> None:
+        import shutil
+
+        t_train_start = time.time()
         total_episodes = constants.NUM_EPISODES + self._eps_offset
+        budget_exceeded = False
+        episode_index = 0
+
+        _multidiff = getattr(constants, "D3QN_MULTIDIFF_DIFFICULTIES", None)
+        _curriculum = getattr(constants, "D3QN_CURRICULUM", False)
+        _curriculum_phases = [[0], [0, 1], [0, 1, 2], [0, 1, 2, 3]]
+        _curriculum_win_threshold = 0.40
+        _curriculum_min_episodes = 200
+        _curriculum_max_phase_episodes = 1500  # force-advance after this many episodes
+        _phase_idx = 0
+        _cur_difficulties = _curriculum_phases[_phase_idx]
+        _phase_outcomes: collections.deque = collections.deque(maxlen=200)
+        _phase_eps = 0
+        _phase_start_episode = 0  # episode_index when current phase began
+
         for episode_index in trange(constants.NUM_EPISODES):
+            if _curriculum:
+                eps_episode = episode_index - _phase_start_episode
+            else:
+                eps_episode = episode_index + self._eps_offset
             self._current_epsilon = epsilon_for_episode(
-                episode_index + self._eps_offset,
+                eps_episode,
                 total_episodes,
                 constants.D3QN_EPS_DECAY_FRACTION,
                 constants.EPS_START,
                 constants.EPS_END,
             )
 
-            observation, _info = self.env.reset()
+            if _multidiff:
+                _active_env = self._curriculum_envs[random.choice(_multidiff)]
+            elif _curriculum:
+                _active_env = self._curriculum_envs[random.choice(_cur_difficulties)]
+            else:
+                _active_env = self.env
+            observation, _info = _active_env.reset()
             last_pos = {
                 "ego": get_location(observation)["ego"],
                 "opp": get_location(observation)["opp"],
@@ -452,7 +504,7 @@ class D3QNTrainer:
                 action, q_values, v_stream, adv_values = self._select_action(state)
                 action_id = action.item() + 1  # env expects 1..4 (no NOOP)
                 observation, reward, terminated, truncated, _info = _step_until_new_frame(
-                    self.env, last_pos, action_id
+                    _active_env, last_pos, action_id
                 )
                 last_pos = _info["location"]
                 done = terminated or truncated or abs(reward) == 1
@@ -506,8 +558,31 @@ class D3QNTrainer:
                     )
 
                     self._recent_outcomes.append(terminal_reward > 0)
+                    if _curriculum:
+                        _phase_outcomes.append(terminal_reward > 0)
+                        _phase_eps += 1
+                        if _phase_idx < len(_curriculum_phases) - 1:
+                            _phase_win_rate = (
+                                sum(_phase_outcomes) / len(_phase_outcomes)
+                                if _phase_outcomes
+                                else 0.0
+                            )
+                            _should_advance = (
+                                len(_phase_outcomes) >= _curriculum_min_episodes
+                                and _phase_win_rate >= _curriculum_win_threshold
+                            ) or _phase_eps >= _curriculum_max_phase_episodes
+                            if _should_advance:
+                                _phase_idx += 1
+                                _cur_difficulties = _curriculum_phases[_phase_idx]
+                                _phase_outcomes.clear()
+                                _phase_eps = 0
+                                _phase_start_episode = episode_index + 1
+                                print(
+                                    f"\nCurriculum: phase {_phase_idx} — diffs={_cur_difficulties}"
+                                    f" (win_rate={_phase_win_rate:.2f})"
+                                )
                     win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
-                    if win_rate > self.best_win_rate:
+                    if len(self._recent_outcomes) >= 200 and win_rate > self.best_win_rate:
                         self.best_win_rate = win_rate
                         save_checkpoint(
                             constants.D3QN_CKPT.best,
@@ -523,10 +598,29 @@ class D3QNTrainer:
                     self._save_checkpoint(
                         episode_index + self._episode_offset, steps_survived=steps_survived
                     )
+                    if time.time() - t_train_start >= TRAIN_TIME_BUDGET:
+                        budget_exceeded = True
                     break
 
+            if budget_exceeded:
+                break
+
+        training_seconds = time.time() - t_train_start
+        episodes_completed = episode_index + 1 + self._episode_offset
+
+        # Ensure policy_best.pt always exists so the benchmark can load it.
+        # If the agent never won, copy the latest checkpoint as best.
+        if not constants.D3QN_CKPT.best.exists() and constants.D3QN_CKPT.latest.exists():
+            shutil.copy(constants.D3QN_CKPT.latest, constants.D3QN_CKPT.best)
+
         self.cb.on_train_end()
-        print("Training complete!")
+        stop_reason = "time_budget" if budget_exceeded else "episodes"
+        print(
+            f"\nTraining complete ({stop_reason}): "
+            f"episodes={episodes_completed} | "
+            f"training_seconds={training_seconds:.1f} | "
+            f"best_win_rate={self.best_win_rate:.3f}"
+        )
 
 
 # ---------------------------------------------------------------------------
