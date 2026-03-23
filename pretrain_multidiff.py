@@ -25,7 +25,7 @@ from surround.conf import constants
 from surround.utils.checkpoint import CheckpointPaths
 
 PRETRAIN_LOG_DIR = Path("runs/surround/pretrain/multidiff_scratch")
-PRETRAIN_BUDGET_HOURS = 16
+PRETRAIN_BUDGET_HOURS = 48
 
 constants.D3QN_LOG_DIR = PRETRAIN_LOG_DIR
 constants.D3QN_CKPT = CheckpointPaths(PRETRAIN_LOG_DIR)
