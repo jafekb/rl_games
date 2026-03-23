@@ -294,7 +294,7 @@ class D3QNTrainer:
         self.memory = UniformReplayMemory(capacity=constants.D3QN_MEMORY_CAPACITY)
         self.n_step_buf = NStepBuffer(n=constants.D3QN_N_STEP, gamma=constants.GAMMA)
 
-        self._recent_outcomes: collections.deque = collections.deque(maxlen=100)
+        self._recent_outcomes: collections.deque = collections.deque(maxlen=200)
         self.best_win_rate = 0.0
         self._total_env_steps = 0
         self._run_metadata = _get_run_metadata()
@@ -518,7 +518,7 @@ class D3QNTrainer:
 
                     self._recent_outcomes.append(terminal_reward > 0)
                     win_rate = sum(self._recent_outcomes) / len(self._recent_outcomes)
-                    if len(self._recent_outcomes) >= 100 and win_rate > self.best_win_rate:
+                    if len(self._recent_outcomes) >= 200 and win_rate > self.best_win_rate:
                         self.best_win_rate = win_rate
                         save_checkpoint(
                             constants.D3QN_CKPT.best,
