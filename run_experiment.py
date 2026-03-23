@@ -188,6 +188,15 @@ std_ret = math.sqrt(sum((r - mean_ret) ** 2 for r in returns) / n)
 total_seconds = time.time() - t_total_start
 peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024 if torch.cuda.is_available() else 0.0
 
+# Per-difficulty breakdown (returns are ordered: BENCHMARK_EPISODES_PER_DIFFICULTY per difficulty)
+epd = BENCHMARK_EPISODES_PER_DIFFICULTY
+diff_win_pcts = []
+for i in range(4):
+    dr = returns[i * epd : (i + 1) * epd]
+    my_pts = sum(10 if r >= 0 else 10 + r for r in dr)
+    opp_pts = sum((10 - r) if r >= 0 else 10 for r in dr)
+    diff_win_pcts.append(100.0 * my_pts / (my_pts + opp_pts))
+
 # Update best checkpoint if this run improved
 if point_win_pct > prev_best_win_pct:
     ckpt_dir = BEST_DIR / "checkpoints"
@@ -199,6 +208,10 @@ if point_win_pct > prev_best_win_pct:
 print("---")
 print(f"point_win_pct:      {point_win_pct:.2f}")
 print(f"prev_best_win_pct:  {prev_best_win_pct:.2f}")
+print(f"diff0_win_pct:      {diff_win_pcts[0]:.2f}")
+print(f"diff1_win_pct:      {diff_win_pcts[1]:.2f}")
+print(f"diff2_win_pct:      {diff_win_pcts[2]:.2f}")
+print(f"diff3_win_pct:      {diff_win_pcts[3]:.2f}")
 print(f"mean_return:        {mean_ret:.3f}")
 print(f"std_return:         {std_ret:.3f}")
 print(f"benchmark_episodes: {n}")

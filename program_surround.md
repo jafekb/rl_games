@@ -53,13 +53,15 @@ Each experiment **resumes from the best saved checkpoint** (`runs/surround/autor
 
 ## The metric
 
-**`point_win_pct` — higher is better.**
+**`point_win_pct` — higher is better.** This is the single value you are maximizing.
 
 Each Surround game goes to 10 points (first to trap the opponent). The benchmark plays 32 episodes (8 at each of difficulties 0, 1, 2, 3) under the greedy policy and reports the percentage of total points scored by our agent:
 
 ```
 point_win_pct = 100 * my_points / (my_points + opp_points)
 ```
+
+The summary also reports **per-difficulty breakdowns** (`diff0_win_pct` through `diff3_win_pct`). These are diagnostic only — they do not affect checkpoint saving or keep/discard decisions, but they tell you where the policy is strong or weak. Use them to guide hypothesis generation: if diff=2 and diff=3 are low, prioritize ideas that improve generalization to harder difficulties.
 
 The round 2 baseline will be established on the first run.
 
@@ -74,6 +76,11 @@ Training runs for 20 minutes (wall clock), then a 32-episode benchmark runs auto
 ```
 ---
 point_win_pct:      62.30
+prev_best_win_pct:  58.10
+diff0_win_pct:      81.25
+diff1_win_pct:      68.75
+diff2_win_pct:      50.00
+diff3_win_pct:      43.75
 mean_return:        1.450
 std_return:         8.120
 benchmark_episodes: 32
