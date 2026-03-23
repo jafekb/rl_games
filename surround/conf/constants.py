@@ -42,7 +42,7 @@ QL_LOG_DIR = Path("runs/surround/ql_visits")
 #     - "class_map": 4-class map -> CNN, exp11
 DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
-EPS_START = 0.02
+EPS_START = 0.30
 EPS_END = 0.0
 EPS_DECAY_FRACTION = 0.01
 TAU = 0.005
@@ -72,7 +72,7 @@ PPO_CKPT = CheckpointPaths(PPO_LOG_DIR)
 # D3QN (Dueling Double DQN, uniform replay, n-step returns)
 # Autoresearch baseline — best-performing hyperparams from exp6.
 # The agent may modify any of these constants.
-D3QN_LR = 3e-5  # fine-tuning: small steps to avoid overwriting exp9 policy
+D3QN_LR = 3e-4  # curriculum from scratch: use standard LR (not fine-tuning LR)
 D3QN_N_STEP = 3
 D3QN_LEARNING_STARTS = 5_000
 D3QN_UPDATE_EVERY = 4
@@ -82,3 +82,5 @@ D3QN_EPS_DECAY_FRACTION = 0.05
 D3QN_LOG_DIR = Path("runs/surround/autoresearch2/current")
 D3QN_CKPT = CheckpointPaths(D3QN_LOG_DIR)
 D3QN_RESUME_FROM: Path | None = None  # always train from scratch
+D3QN_FORCE_RESUME_FROM: Path | None = None  # None = fresh start (overrides harness injection)
+D3QN_CURRICULUM = True  # curriculum learning: diff=0 -> [0,1] -> [0,1,2] -> [0,1,2,3]
