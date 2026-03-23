@@ -36,6 +36,7 @@ constants.D3QN_EPS_DECAY_FRACTION = 0.10  # decay over 10% of 50K = 5K episodes
 constants.D3QN_FORCE_RESUME_FROM = None  # train from scratch, ignore harness injection
 constants.D3QN_CURRICULUM = False
 constants.D3QN_MULTIDIFF_DIFFICULTIES = [0, 1, 2, 3]  # uniform sampling across all diffs
+constants.NUM_EPISODES = 10_000_000  # effectively infinite — time budget is the real stop
 
 import surround.d3qn.train_d3qn as train_mod  # noqa: E402
 
