@@ -37,6 +37,7 @@ constants.D3QN_FORCE_RESUME_FROM = None  # train from scratch, ignore harness in
 constants.D3QN_CURRICULUM = False
 constants.D3QN_MULTIDIFF_DIFFICULTIES = [0, 1, 2, 3]  # uniform sampling across all diffs
 constants.NUM_EPISODES = 10_000_000  # effectively infinite — time budget is the real stop
+constants.CHECKPOINT_INTERVAL = 50_000  # ~7 periodic saves over 48h (~350K eps); each ckpt is ~14MB
 
 import surround.d3qn.train_d3qn as train_mod  # noqa: E402
 
