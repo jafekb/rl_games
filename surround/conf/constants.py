@@ -42,7 +42,7 @@ QL_LOG_DIR = Path("runs/surround/ql_visits")
 #     - "class_map": 4-class map -> CNN, exp11
 DQN_STATE_TYPE = "class_map"
 BATCH_SIZE = 128
-EPS_START = 0.0  # exp25: pure greedy fine-tuning, no random actions
+EPS_START = 0.02
 EPS_END = 0.0
 EPS_DECAY_FRACTION = 0.01
 TAU = 0.005
