@@ -32,7 +32,7 @@ constants.D3QN_CKPT = CheckpointPaths(PRETRAIN_LOG_DIR)
 constants.EPS_START = 1.0  # full exploration from random weights
 constants.EPS_END = 0.05  # small floor to retain some exploration
 constants.D3QN_LR = 3e-4  # standard LR for scratch training
-constants.D3QN_EPS_DECAY_FRACTION = 0.10  # decay over 10% of 50K = 5K episodes
+constants.D3QN_EPS_DECAY_FRACTION = 0.001  # decay over ~10K episodes regardless of NUM_EPISODES cap
 constants.D3QN_FORCE_RESUME_FROM = None  # train from scratch, ignore harness injection
 constants.D3QN_CURRICULUM = False
 constants.D3QN_MULTIDIFF_DIFFICULTIES = [0, 1, 2, 3]  # uniform sampling across all diffs
